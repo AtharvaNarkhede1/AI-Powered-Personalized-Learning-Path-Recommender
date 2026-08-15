@@ -1,0 +1,101 @@
+[
+  {
+    "course_id": "py-101",
+    "title": "Python Programming Basics",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["python", "programming-fundamentals"],
+    "difficulty": "beginner",
+    "estimated_hours": 20,
+    "prerequisites": []
+  },
+  {
+    "course_id": "ds-101",
+    "title": "Data Analysis with Python (Pandas & NumPy)",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["python", "data-analysis", "pandas"],
+    "difficulty": "beginner",
+    "estimated_hours": 25,
+    "prerequisites": ["py-101"]
+  },
+  {
+    "course_id": "ml-101",
+    "title": "Machine Learning Foundations",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["machine-learning", "statistics", "python"],
+    "difficulty": "intermediate",
+    "estimated_hours": 35,
+    "prerequisites": ["ds-101"]
+  },
+  {
+    "course_id": "ml-201",
+    "title": "Applied Deep Learning",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["deep-learning", "neural-networks", "machine-learning"],
+    "difficulty": "advanced",
+    "estimated_hours": 40,
+    "prerequisites": ["ml-101"]
+  },
+  {
+    "course_id": "web-101",
+    "title": "HTML, CSS & JavaScript Fundamentals",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["html", "css", "javascript", "web-development"],
+    "difficulty": "beginner",
+    "estimated_hours": 20,
+    "prerequisites": []
+  },
+  {
+    "course_id": "web-201",
+    "title": "React for Frontend Development",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["react", "javascript", "web-development"],
+    "difficulty": "intermediate",
+    "estimated_hours": 30,
+    "prerequisites": ["web-101"]
+  },
+  {
+    "course_id": "be-201",
+    "title": "Backend APIs with FastAPI",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["python", "backend", "apis"],
+    "difficulty": "intermediate",
+    "estimated_hours": 25,
+    "prerequisites": ["py-101"]
+  },
+  {
+    "course_id": "cloud-201",
+    "title": "Cloud Deployment Essentials (AWS)",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["cloud", "aws", "devops"],
+    "difficulty": "intermediate",
+    "estimated_hours": 20,
+    "prerequisites": ["be-201"]
+  },
+  {
+    "course_id": "sql-101",
+    "title": "SQL & Relational Databases",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["sql", "databases"],
+    "difficulty": "beginner",
+    "estimated_hours": 15,
+    "prerequisites": []
+  },
+  {
+    "course_id": "proj-ds-301",
+    "title": "Capstone Project: End-to-End ML Pipeline",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["machine-learning", "deployment", "project"],
+    "difficulty": "advanced",
+    "estimated_hours": 30,
+    "prerequisites": ["ml-101", "sql-101"]
+  },
+  {
+    "course_id": "proj-web-301",
+    "title": "Capstone Project: Full-Stack Web App",
+    "provider": "PathFinder Academy",
+    "skill_tags": ["react", "backend", "project"],
+    "difficulty": "advanced",
+    "estimated_hours": 30,
+    "prerequisites": ["web-201", "be-201"]
+  }
+]
