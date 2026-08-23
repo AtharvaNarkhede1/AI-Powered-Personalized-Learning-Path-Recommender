@@ -1,51 +1,59 @@
 """
-Career PathFinder API entrypoint.
-
-Run locally with:
-    uvicorn app.main:app --reload --port 8000
-
-Docs available at http://localhost:8000/docs once running.
-
-Routers (see app/api/*.py for full endpoint docs):
-  /api/profile   - learner profiling engine
-  /api/chat      - conversational interface
-  /api/recommend - recommendation engine + explanations + assistant Q&A
-  /api/path      - learning path generator
-  /api/progress  - progress dashboard data
-
-TODO:
-- Add a health/readiness split (/healthz vs /readyz) before deploying behind
-  a load balancer.
-- Add request logging / rate limiting middleware.
+Main FastAPI Application Entrypoint.
+Registers middleware, database startup handlers, and API routers.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from app.core.config import settings
-from app.api import profile, chat, recommend, path, progress
+from app.db.database import engine, Base
+from app.api import (
+    auth, onboarding, careers, skills, recommendations,
+    paths, assessments, assistant, analytics, system
+)
 
-app = FastAPI(title=settings.APP_NAME, version="0.1.0")
+# Create database tables automatically
+Base.metadata.create_all(bind=engine)
 
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.VERSION,
+    description="Industry-Ready AI-Powered Gen-Z Career & Personalized Learning Path Operating System"
+)
+
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(profile.router)
-app.include_router(chat.router)
-app.include_router(recommend.router)
-app.include_router(path.router)
-app.include_router(progress.router)
+# Include API Routers
+app.include_router(auth.router)
+app.include_router(onboarding.router)
+app.include_router(careers.router)
+app.include_router(skills.router)
+app.include_router(recommendations.router)
+app.include_router(paths.router)
+app.include_router(assessments.router)
+app.include_router(assistant.router)
+app.include_router(analytics.router)
+app.include_router(system.router)
 
 
 @app.get("/")
-def root():
-    return {"service": settings.APP_NAME, "status": "ok"}
+def root_status():
+    return {
+        "status": "online",
+        "app": settings.APP_NAME,
+        "version": settings.VERSION,
+        "docs": "/docs"
+    }
 
 
-@app.get("/healthz")
-def health():
-    return {"status": "healthy"}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

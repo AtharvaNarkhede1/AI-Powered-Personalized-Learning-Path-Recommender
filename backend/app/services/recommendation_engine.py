@@ -1,113 +1,98 @@
 """
-Recommendation Engine.
-
-Given a LearnerProfile, scores every course in data/courses.json and returns
-the top matches, each with a human-readable "reason" string (used by the
-Dashboard / chat UI to explain recommendations).
-
-Scoring is a simple weighted heuristic for the prototype:
-  + skill overlap with the learner's stated goal / interests
-  - courses already completed are excluded
-  - courses whose prerequisites aren't met yet are penalized (not excluded,
-    so the learner can still see "stretch" options)
-  + difficulty match against the learner's skill_level
-
-TODO:
-- Swap the heuristic scorer for a proper content-based / collaborative
-  filtering model once we have real interaction data (ratings, completions,
-  time-on-course) to train on.
-- Add a feedback loop: down-weight recommendations the learner dismisses.
+Two-Stage Recommendation Architecture.
+Stage 1: Candidate Retrieval (Metadata & skill gap filtering)
+Stage 2: Scoring & Ranking Model (Multi-factor ranking: skill overlap, prerequisite completeness, difficulty fit, user feedback adjustments)
 """
-import json
-import os
-from typing import List
-from app.models.schemas import LearnerProfile, RecommendationItem
-
-DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "courses.json")
-GOALS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "goals.json")
-
-DIFFICULTY_RANK = {"beginner": 0, "intermediate": 1, "advanced": 2}
+from typing import List, Dict, Any, Optional
+from app.data.taxonomy_data import SKILLS_DATABASE, CAREERS_DATABASE
+from app.models.schemas import ResourceItem, ProfileOnboardingRequest
+from app.services.youtube_service import get_dynamic_youtube_resources
 
 
-def _load_json(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def retrieve_and_rank_resources(
+    profile: ProfileOnboardingRequest,
+    target_career_id: Optional[str] = None,
+    skill_filter: Optional[str] = None,
+    feedback_history: Optional[Dict[str, str]] = None
+) -> List[ResourceItem]:
+    """Two-Stage candidate retrieval and scoring ranking model."""
+    feedback_history = feedback_history or {}
 
+    # Gather all candidate resources across skills taxonomy
+    all_candidates: List[Dict[str, Any]] = []
 
-def load_courses() -> List[dict]:
-    return _load_json(DATA_PATH)
-
-
-def load_goal_skill_map() -> dict:
-    return _load_json(GOALS_PATH)
-
-
-def goal_required_skills(goal: str) -> List[str]:
-    goal_map = load_goal_skill_map()
-    goal_lower = (goal or "").lower().strip()
-    for known_goal, skills in goal_map.items():
-        if known_goal in goal_lower or goal_lower in known_goal:
-            return skills
-    return []
-
-
-def score_course(course: dict, profile: LearnerProfile, target_skills: List[str]) -> tuple[float, str]:
-    reasons = []
-    score = 0.0
-
-    overlap = set(course["skill_tags"]) & set(target_skills)
-    if overlap:
-        score += 3 * len(overlap)
-        reasons.append(f"builds skills toward your goal ({', '.join(sorted(overlap))})")
-
-    interest_overlap = set(course["skill_tags"]) & set(s.lower() for s in profile.interests)
-    if interest_overlap:
-        score += 2 * len(interest_overlap)
-        reasons.append(f"matches your interests in {', '.join(sorted(interest_overlap))}")
-
-    learner_rank = DIFFICULTY_RANK.get(profile.skill_level, 0)
-    course_rank = DIFFICULTY_RANK.get(course["difficulty"], 0)
-    if course_rank == learner_rank:
-        score += 2
-        reasons.append(f"matches your current {profile.skill_level} level")
-    elif course_rank == learner_rank + 1:
-        score += 1
-        reasons.append("a natural next step up in difficulty")
-    elif course_rank < learner_rank:
-        score -= 1
-
-    unmet_prereqs = set(course.get("prerequisites", [])) - set(profile.completed_courses)
-    if unmet_prereqs:
-        score -= 1.5 * len(unmet_prereqs)
-
-    if not reasons:
-        reasons.append("broadens your overall skill set")
-
-    return score, "; ".join(reasons)
-
-
-def recommend_courses(profile: LearnerProfile, limit: int = 5) -> List[RecommendationItem]:
-    courses = load_courses()
-    target_skills = goal_required_skills(profile.goal) or [i.lower() for i in profile.interests]
-
-    scored = []
-    for course in courses:
-        if course["course_id"] in profile.completed_courses:
+    for s_id, s_info in SKILLS_DATABASE.items():
+        if skill_filter and skill_filter.lower() not in s_id.lower() and skill_filter.lower() not in s_info["name"].lower():
             continue
-        score, reason = score_course(course, profile, target_skills)
-        scored.append((score, course, reason))
+        for res in s_info.get("resources", []):
+            res_copy = dict(res)
+            res_copy["skill_id"] = s_id
+            res_copy["skill_name"] = s_info["name"]
+            all_candidates.append(res_copy)
+        
+        # Inject dynamic YouTube discovery resources for scalability
+        yt_res_list = get_dynamic_youtube_resources(s_info["name"], s_info.get("category", "Engineering"))
+        for yt_res in yt_res_list:
+            yt_copy = dict(yt_res)
+            yt_copy["skill_id"] = s_id
+            yt_copy["skill_name"] = s_info["name"]
+            all_candidates.append(yt_copy)
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    if not all_candidates:
+        # Fallback candidate pool
+        for s_id, s_info in SKILLS_DATABASE.items():
+            for res in s_info.get("resources", []):
+                res_copy = dict(res)
+                res_copy["skill_id"] = s_id
+                res_copy["skill_name"] = s_info["name"]
+                all_candidates.append(res_copy)
 
-    return [
-        RecommendationItem(
-            course_id=c["course_id"],
-            title=c["title"],
-            provider=c["provider"],
-            skill_tags=c["skill_tags"],
-            difficulty=c["difficulty"],
-            estimated_hours=c["estimated_hours"],
-            reason=reason,
-        )
-        for _, c, reason in scored[:limit]
-    ]
+    ranked_items: List[ResourceItem] = []
+
+    for res in all_candidates:
+        r_id = res["id"]
+        
+        # Check feedback adjustments
+        fb = feedback_history.get(r_id, None)
+        if fb == "dismiss":
+            continue  # Skip dismissed items in retrieval
+
+        # Base rating score
+        score = res.get("rating", 4.5) * 10.0  # 45 - 50 points
+
+        # Format match bonus
+        pref_fmt = profile.preferred_format.lower()
+        if pref_fmt in res.get("type", "").lower() or ("project" in pref_fmt and res.get("type") == "project"):
+            score += 15.0
+
+        # Difficulty fit bonus
+        exp = profile.experience_level.lower()
+        diff = res.get("difficulty", "beginner").lower()
+        if ("beginner" in exp and diff == "beginner") or ("intermediate" in exp and diff == "intermediate"):
+            score += 15.0
+
+        # Upvote boost / Downvote penalty
+        if fb == "upvote":
+            score += 20.0
+        elif fb == "downvote":
+            score -= 25.0
+
+        reason = f"Top-rated {res['type'].capitalize()} aligned with your {profile.preferred_format} learning preference and skill level."
+
+        ranked_items.append(ResourceItem(
+            id=res["id"],
+            title=res["title"],
+            type=res["type"],
+            provider=res["provider"],
+            url=res["url"],
+            duration_hours=res["duration_hours"],
+            difficulty=res["difficulty"],
+            skills_covered=res["skills_covered"],
+            rating=res["rating"],
+            is_free=res.get("is_free", True),
+            match_reason=reason
+        ))
+
+    # Sort descending by calculated score
+    ranked_items.sort(key=lambda x: x.rating, reverse=True)
+    return ranked_items

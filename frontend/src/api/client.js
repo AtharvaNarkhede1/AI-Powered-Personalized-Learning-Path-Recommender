@@ -1,51 +1,82 @@
-// Thin wrapper around the Career PathFinder backend REST API.
-// Base URL comes from VITE_API_BASE_URL (see .env.example); defaults to the
-// local backend dev server so `npm run dev` works with zero config.
-//
-// TODO: add error toasts / centralized error handling once the UI has a
-// notification system; right now callers must catch rejected promises.
+/**
+ * API Client for interacting with FastAPI Backend endpoints.
+ */
+const BASE_URL = 'http://127.0.0.1:8000/api';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+async function fetchJSON(endpoint, options = {}) {
+  const url = `${BASE_URL}${endpoint}`;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
 
-async function request(path, options = {}) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
+  try {
+    const res = await fetch(url, { ...options, headers });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `HTTP Error ${res.status}`);
+    }
+    return await res.json();
+  } catch (error) {
+    console.error(`API Error on ${endpoint}:`, error);
+    throw error;
   }
-  return res.json();
 }
 
 export const api = {
-  getProfile: (learnerId) => request(`/api/profile/${learnerId}`),
-  updateProfile: (learnerId, data) =>
-    request(`/api/profile/${learnerId}`, { method: "PUT", body: JSON.stringify(data) }),
+  // Auth
+  demoLogin: () => fetchJSON('/auth/demo-login', { method: 'POST' }),
+  login: (email, password) => fetchJSON('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  
+  // Onboarding & Profile
+  saveOnboardingProfile: (userId, profileData) =>
+    fetchJSON(`/onboarding/${userId}`, { method: 'POST', body: JSON.stringify(profileData) }),
+  getOnboardingProfile: (userId) => fetchJSON(`/onboarding/${userId}`),
+  searchKeywords: (query) => fetchJSON(`/onboarding/keywords/search?q=${encodeURIComponent(query)}`),
 
-  sendChatMessage: (learnerId, message) =>
-    request(`/api/chat`, { method: "POST", body: JSON.stringify({ learner_id: learnerId, message }) }),
+  // Careers & Discovery
+  discoverCareers: (profileData) =>
+    fetchJSON('/careers/discover', { method: 'POST', body: JSON.stringify(profileData) }),
+  getCareerDetail: (careerId) => fetchJSON(`/careers/detail/${careerId}`),
+  compareCareers: (careerIds) =>
+    fetchJSON('/careers/compare', { method: 'POST', body: JSON.stringify({ career_ids: careerIds }) }),
+  getCareerCatalog: () => fetchJSON('/careers/catalog'),
 
-  getRecommendations: (learnerId) => request(`/api/recommend/${learnerId}`),
-  explainRecommendation: (learnerId, courseId) =>
-    request(`/api/recommend/${learnerId}/explain`, {
-      method: "POST",
-      body: JSON.stringify({ learner_id: learnerId, course_id: courseId }),
+  // Skills & Gaps
+  analyzeSkillGaps: (careerId, profileData) =>
+    fetchJSON(`/skills/analyze-gap/${careerId}`, { method: 'POST', body: JSON.stringify(profileData) }),
+
+  // Recommendations & Feedback
+  getRecommendations: (profileData, filters = {}) =>
+    fetchJSON('/recommendations/resources', {
+      method: 'POST',
+      body: JSON.stringify({ ...filters, ...profileData })
     }),
-  askAssistant: (learnerId, question) =>
-    request(`/api/recommend/${learnerId}/ask`, {
-      method: "POST",
-      body: JSON.stringify({ learner_id: learnerId, question }),
+  submitFeedback: (resourceId, feedbackType, comment = '') =>
+    fetchJSON('/recommendations/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ resource_id: resourceId, feedback_type: feedbackType, comment })
     }),
 
-  generatePath: (learnerId) => request(`/api/path/${learnerId}/generate`, { method: "POST" }),
-  getPath: (learnerId) => request(`/api/path/${learnerId}`),
+  // Learning Path
+  generatePath: (careerId, profileData) =>
+    fetchJSON(`/paths/generate/${careerId}`, { method: 'POST', body: JSON.stringify(profileData) }),
+  completeMilestone: (careerId, milestoneId, profileData) =>
+    fetchJSON(`/paths/milestone/${careerId}/complete/${milestoneId}`, { method: 'POST', body: JSON.stringify(profileData) }),
 
-  getProgress: (learnerId) => request(`/api/progress/${learnerId}`),
-  updateMilestoneStatus: (learnerId, milestoneId, status) =>
-    request(`/api/progress/${learnerId}`, {
-      method: "PUT",
-      body: JSON.stringify({ learner_id: learnerId, milestone_id: milestoneId, status }),
-    }),
+  // Quizzes & Assessments
+  getQuiz: (skillId) => fetchJSON(`/assessments/quiz/${skillId}`),
+  submitQuiz: (assessmentId, answers) =>
+    fetchJSON('/assessments/submit', { method: 'POST', body: JSON.stringify({ assessment_id: assessmentId, answers }) }),
+
+  // Assistant & Chat
+  sendChatMessage: (message, contextCareerId = null) =>
+    fetchJSON('/assistant/chat', { method: 'POST', body: JSON.stringify({ message, context_career_id: contextCareerId }) }),
+
+  // Analytics & System
+  getDashboardMetrics: (profileData, targetCareerId = 'robotics_eng') =>
+    fetchJSON('/analytics/dashboard', { method: 'POST', body: JSON.stringify(profileData) }),
+  getSystemStatus: () => fetchJSON('/system/status'),
+  configureKeys: (geminiKey, openaiKey) =>
+    fetchJSON('/system/keys', { method: 'POST', body: JSON.stringify({ gemini_api_key: geminiKey, openai_api_key: openaiKey }) })
 };

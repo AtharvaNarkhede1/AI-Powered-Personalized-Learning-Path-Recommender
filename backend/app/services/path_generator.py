@@ -1,112 +1,142 @@
 """
-Learning Path Generator.
-
-Turns a learner's goal + profile into an ordered sequence of milestones,
-each grouping one or more courses, respecting prerequisite chains, and
-finishing with a capstone project where one exists for the goal.
-
-Algorithm (prototype-level, deterministic):
-  1. Resolve the target skill set for the learner's goal.
-  2. Pull every course relevant to those skills (incl. prerequisite chains,
-     even if a prerequisite isn't itself "on topic").
-  3. Topologically sort by prerequisites so earlier milestones unlock later
-     ones.
-  4. Group into milestones of ~1-2 courses each; attach a capstone project
-     course as the final milestone if the dataset has one tagged "project".
-
-TODO:
-- Replace the fixed grouping (courses-per-milestone) with pacing based on
-  profile.hours_per_week so milestones map to realistic calendar weeks.
-- Support re-generating a path mid-course when progress/feedback signals
-  the learner needs remediation (see api/progress.py TODO).
+Learning Path & Prerequisite-Aware Roadmap Generator.
+Generates an ordered milestone sequence respecting skill prerequisites, attaching courses, hands-on projects, diagnostic assessments, and calculating the Next Recommended Action.
 """
-from typing import List
-from app.models.schemas import LearnerProfile, LearningPath, Milestone
-from app.services.recommendation_engine import load_courses, goal_required_skills
+from typing import List, Dict, Any, Optional
+from app.data.taxonomy_data import CAREERS_DATABASE, SKILLS_DATABASE, QUIZZES_DATABASE
+from app.models.schemas import (
+    LearningPathResponse, Milestone, ResourceItem, NextRecommendedAction,
+    ProfileOnboardingRequest, SkillGapItem
+)
+from app.services.graph_engine import get_topologically_sorted_skills
+from app.services.skill_gap_engine import analyze_skill_gaps
+from app.services.recommendation_engine import retrieve_and_rank_resources
+from app.services.what_not_to_do_engine import generate_what_not_to_do_warnings
+from app.services.readiness_calculator import calculate_job_readiness_and_timeline
 
 
-def _topological_course_order(courses: List[dict]) -> List[dict]:
-    by_id = {c["course_id"]: c for c in courses}
-    visited = set()
-    ordered = []
+def generate_learning_path(
+    career_id: str,
+    profile: ProfileOnboardingRequest,
+    feedback_history: Optional[Dict[str, str]] = None
+) -> LearningPathResponse:
+    """Generates a complete prerequisite-aware milestone roadmap for a selected career."""
+    target_career = next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), CAREERS_DATABASE[0])
+    
+    # 1. Analyze skill gaps
+    gap_analysis = analyze_skill_gaps(target_career["career_id"], profile)
+    skill_gaps = gap_analysis.gaps
 
-    def visit(course_id):
-        if course_id in visited or course_id not in by_id:
-            return
-        visited.add(course_id)
-        for prereq_id in by_id[course_id].get("prerequisites", []):
-            visit(prereq_id)
-        ordered.append(by_id[course_id])
+    # 2. Get target skill IDs
+    target_skill_ids = [g.skill_id for g in skill_gaps if g.gap_delta > 0.0]
+    if not target_skill_ids:
+        target_skill_ids = [g.skill_id for g in skill_gaps]
 
-    for c in courses:
-        visit(c["course_id"])
+    # 3. Topologically sort skills by prerequisites
+    ordered_skill_ids = get_topologically_sorted_skills(target_skill_ids)
 
-    return ordered
-
-
-def generate_learning_path(profile: LearnerProfile) -> LearningPath:
-    all_courses = load_courses()
-    target_skills = set(goal_required_skills(profile.goal) or [i.lower() for i in profile.interests])
-
-    relevant = [c for c in all_courses if set(c["skill_tags"]) & target_skills]
-    relevant_ids = {c["course_id"] for c in relevant}
-
-    # pull in prerequisite courses even if not directly "on topic"
-    by_id = {c["course_id"]: c for c in all_courses}
-    expanded = dict((c["course_id"], c) for c in relevant)
-    frontier = list(relevant)
-    while frontier:
-        course = frontier.pop()
-        for prereq_id in course.get("prerequisites", []):
-            if prereq_id not in expanded and prereq_id in by_id:
-                expanded[prereq_id] = by_id[prereq_id]
-                frontier.append(by_id[prereq_id])
-
-    ordered = _topological_course_order(list(expanded.values()))
-    ordered = [c for c in ordered if c["course_id"] not in profile.completed_courses]
-
-    projects = [c for c in ordered if "project" in c["skill_tags"]]
-    non_projects = [c for c in ordered if "project" not in c["skill_tags"]]
-
+    # 4. Group into 3 to 5 structured Milestones
     milestones: List[Milestone] = []
-    group_size = 2
-    for i in range(0, len(non_projects), group_size):
-        group = non_projects[i:i + group_size]
-        milestones.append(
-            Milestone(
-                milestone_id=f"m{len(milestones) + 1}",
-                title=" + ".join(c["title"] for c in group),
-                course_ids=[c["course_id"] for c in group],
-                prerequisites=[
-                    p for c in group for p in c.get("prerequisites", [])
-                    if p not in [g["course_id"] for g in group]
-                ],
-                assessment=f"Quiz: {', '.join(c['title'] for c in group)}",
-            )
-        )
+    chunk_size = max(1, len(ordered_skill_ids) // 4 + (1 if len(ordered_skill_ids) % 4 != 0 else 0))
+    
+    hours_per_week = max(4, profile.hours_per_week)
 
-    for project in projects:
-        milestones.append(
-            Milestone(
-                milestone_id=f"m{len(milestones) + 1}",
-                title=project["title"],
-                course_ids=[project["course_id"]],
-                project=project["title"],
-                prerequisites=project.get("prerequisites", []),
-                assessment="Project submission & peer review",
-            )
-        )
+    for i in range(0, len(ordered_skill_ids), chunk_size):
+        milestone_skills = ordered_skill_ids[i:i + chunk_size]
+        seq_num = len(milestones) + 1
 
-    total_hours = sum(
-        by_id[cid]["estimated_hours"]
-        for m in milestones
-        for cid in m.course_ids
-        if cid in by_id
+        # Fetch resources for these skills
+        m_resources: List[ResourceItem] = []
+        for s_id in milestone_skills:
+            ranked = retrieve_and_rank_resources(profile, target_career_id=career_id, skill_filter=s_id, feedback_history=feedback_history)
+            if ranked:
+                m_resources.extend(ranked[:2])
+
+        # Deduplicate resources
+        unique_res = []
+        seen_ids = set()
+        for r in m_resources:
+            if r.id not in seen_ids:
+                unique_res.append(r)
+                seen_ids.add(r.id)
+
+        # Milestone titles based on phase
+        if seq_num == 1:
+            title = f"Phase 1: Foundations & Core Tools"
+            desc = "Master basic syntax, foundational math, and core development tools before advancing."
+        elif seq_num == 2:
+            title = f"Phase 2: Core Engineering & Systems"
+            desc = "Build core technical proficiency, architecture understanding, and algorithm design."
+        elif seq_num == 3:
+            title = f"Phase 3: Advanced Applications & Frameworks"
+            desc = "Implement complex models, control systems, pipelines, and industry frameworks."
+        else:
+            title = f"Phase 4: Industry Capstone & Readiness"
+            desc = "Deliver end-to-end production systems, edge optimizations, and portfolio projects."
+
+        est_hours = sum(r.duration_hours for r in unique_res) + 10
+        est_weeks = max(1, round(est_hours / hours_per_week))
+
+        # Attach project & assessment
+        s_names = [SKILLS_DATABASE.get(sid, {}).get("name", sid) for sid in milestone_skills]
+        project_obj = {
+            "title": f"Hands-on Project: {s_names[0] if s_names else 'Engineering'} Implementation",
+            "description": f"Build a practical working portfolio project demonstrating proficiency in {', '.join(s_names[:2])}.",
+            "required_deliverable": "GitHub repo link + demo video"
+        }
+
+        quiz_obj = None
+        for sid in milestone_skills:
+            if sid in QUIZZES_DATABASE:
+                quiz_info = QUIZZES_DATABASE[sid]
+                quiz_obj = {
+                    "assessment_id": quiz_info["assessment_id"],
+                    "title": quiz_info["title"],
+                    "description": quiz_info["description"]
+                }
+                break
+
+        milestones.append(Milestone(
+            id=f"ms_{seq_num}",
+            sequence_order=seq_num,
+            title=title,
+            description=desc,
+            estimated_hours=int(est_hours),
+            estimated_weeks=int(est_weeks),
+            status="in_progress" if seq_num == 1 else "not_started",
+            target_skills=s_names,
+            resources=unique_res[:3],
+            project=project_obj,
+            assessment=quiz_obj
+        ))
+
+    # 5. Job readiness and timeline calculations
+    readiness_data = calculate_job_readiness_and_timeline(skill_gaps, profile)
+
+    # 6. Next Recommended Action
+    first_res = milestones[0].resources[0] if milestones and milestones[0].resources else None
+    next_action = NextRecommendedAction(
+        action_type="start_course",
+        title=f"Start '{first_res.title}'" if first_res else "Begin Phase 1 Diagnostic Quiz",
+        description=f"Complete your first resource in {milestones[0].title} to build momentum." if milestones else "Start onboarding quiz.",
+        milestone_id=milestones[0].id if milestones else "ms_1",
+        resource_id=first_res.id if first_res else None,
+        estimated_minutes=45,
+        urgency="high"
     )
 
-    return LearningPath(
-        learner_id=profile.learner_id,
-        goal=profile.goal or "General skill growth",
+    # 7. What NOT to do warnings
+    warnings = generate_what_not_to_do_warnings(profile, target_career["career_id"], skill_gaps)
+
+    return LearningPathResponse(
+        id=f"path_{target_career['career_id']}",
+        career_id=target_career["career_id"],
+        career_title=target_career["title"],
+        job_readiness_score=readiness_data["job_readiness_score"],
+        estimated_total_hours=readiness_data["estimated_total_hours"],
+        estimated_weeks=readiness_data["estimated_weeks"],
+        hours_per_week=profile.hours_per_week,
         milestones=milestones,
-        total_estimated_hours=total_hours,
+        next_action=next_action,
+        what_not_to_do_warnings=warnings
     )
