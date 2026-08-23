@@ -1,72 +1,167 @@
-import { useState, useRef, useEffect } from "react";
-import { api } from "../api/client.js";
+import React, { useState } from 'react';
+import { Send, Bot, User, Sparkles, MessageSquare } from 'lucide-react';
+import { api } from '../api/client';
 
-// Conversational front door: learner describes goals/interests in natural
-// language; each message is sent to POST /api/chat, which both updates the
-// LearnerProfile (via profiling_engine's extraction) and returns a reply.
-export default function ChatInterface({ learnerId, onProfileUpdated }) {
+const QUICK_PROMPTS = [
+  "Why was this path recommended?",
+  "What NOT to do in this field?",
+  "How long will it take to reach job readiness?",
+  "Compare Robotics vs AI Engineering"
+];
+
+export default function ChatInterface({ activeCareerId }) {
   const [messages, setMessages] = useState([
     {
-      role: "assistant",
-      content:
-        "Hi! Tell me about your learning goals - for example, \"I want to become a data scientist, I'm a beginner with Python.\"",
-    },
+      sender: 'assistant',
+      content: "Hello! I'm your AI Career & Learning Path Assistant. Ask me anything about your recommendations, skill gaps, or career strategy!"
+    }
   ]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const endRef = useRef(null);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const handleSend = async (textToSend) => {
+    const query = textToSend || input;
+    if (!query.trim() || loading) return;
 
-  async function handleSend(e) {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
-
-    const userMessage = { role: "user", content: input };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
+    const userMsg = { sender: 'user', content: query };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
     setLoading(true);
 
     try {
-      const res = await api.sendChatMessage(learnerId, userMessage.content);
-      setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
-      if (Object.keys(res.extracted_profile_updates || {}).length > 0) {
-        onProfileUpdated?.();
-      }
+      const res = await api.sendChatMessage(query, activeCareerId);
+      const botMsg = {
+        sender: 'assistant',
+        content: res.reply,
+        followups: res.suggested_followups || []
+      };
+      setMessages(prev => [...prev, botMsg]);
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Sorry, something went wrong: ${err.message}` },
-      ]);
+      setMessages(prev => [...prev, { sender: 'assistant', content: 'Sorry, I encountered an error processing your question.' }]);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="card">
-      <h3>Learning Assistant</h3>
-      <div className="chat-window">
-        {messages.map((m, i) => (
-          <div key={i} className={`chat-bubble ${m.role}`}>
-            {m.content}
+    <div style={{ maxWidth: '900px', margin: '2rem auto', padding: '0 1.5rem' }}>
+      <div className="glass-card" style={{ padding: '2rem', minHeight: '600px', display: 'flex', flexDirection: 'column' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', pb: '1rem', borderBottom: '1px solid #E2E8F0' }}>
+          <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#EEF2FF', color: '#4F46E5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Bot size={22} />
           </div>
-        ))}
-        <div ref={endRef} />
+          <div>
+            <h3 style={{ fontSize: '1.2rem', margin: 0 }}>AI Conversational Career Assistant</h3>
+            <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Grounded in structured taxonomy & learner context</span>
+          </div>
+        </div>
+
+        {/* Message Stream */}
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '1.5rem', paddingRight: '0.5rem' }}>
+          {messages.map((m, idx) => {
+            const isUser = m.sender === 'user';
+            return (
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  gap: '0.75rem',
+                  alignSelf: isUser ? 'flex-end' : 'flex-start',
+                  maxWidth: '85%'
+                }}
+              >
+                {!isUser && (
+                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#4F46E5', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Bot size={18} />
+                  </div>
+                )}
+                <div>
+                  <div style={{
+                    background: isUser ? '#4F46E5' : '#F1F5F9',
+                    color: isUser ? '#FFFFFF' : '#0F172A',
+                    padding: '1rem 1.25rem',
+                    borderRadius: isUser ? '16px 16px 2px 16px' : '16px 16px 16px 2px',
+                    fontSize: '0.95rem',
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre-line'
+                  }}>
+                    {m.content}
+                  </div>
+
+                  {/* Followup Prompt Chips */}
+                  {m.followups && m.followups.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.75rem' }}>
+                      {m.followups.map((chip, cIdx) => (
+                        <button
+                          key={cIdx}
+                          onClick={() => handleSend(chip)}
+                          style={{
+                            background: '#FFFFFF',
+                            border: '1px solid #C7D2FE',
+                            color: '#4F46E5',
+                            padding: '0.35rem 0.75rem',
+                            borderRadius: '999px',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {loading && <div style={{ color: '#64748B', fontStyle: 'italic', fontSize: '0.85rem' }}>AI Assistant is thinking...</div>}
+        </div>
+
+        {/* Quick Suggestion Chips */}
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          {QUICK_PROMPTS.map((p, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleSend(p)}
+              style={{
+                background: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                color: '#475569',
+                padding: '0.4rem 0.85rem',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                cursor: 'pointer'
+              }}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* Input Bar */}
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="Ask AI about recommendations, career realities, or prerequisites..."
+            style={{
+              flex: 1,
+              padding: '0.85rem 1.25rem',
+              borderRadius: '10px',
+              border: '1px solid #CBD5E1',
+              fontSize: '0.95rem'
+            }}
+          />
+          <button className="btn-primary" onClick={() => handleSend()}>
+            <Send size={16} /> Send
+          </button>
+        </div>
       </div>
-      <form className="chat-input-row" onSubmit={handleSend}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Describe your goals, interests, or ask a question..."
-          disabled={loading}
-        />
-        <button className="btn" type="submit" disabled={loading}>
-          {loading ? "..." : "Send"}
-        </button>
-      </form>
     </div>
   );
 }
