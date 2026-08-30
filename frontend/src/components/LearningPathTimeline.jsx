@@ -30,7 +30,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
 
   return (
     <div style={{ maxWidth: '1100px', margin: '2rem auto', padding: '0 1.5rem' }}>
-      {/* Target Career Header */}
       <div className="glass-card" style={{ padding: '2rem', marginBottom: '2.5rem', background: 'linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem' }}>
           <div>
@@ -46,7 +45,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
             )}
           </div>
 
-          {/* Job Readiness Metric Circle */}
           <div style={{
             background: '#FFFFFF',
             borderRadius: '16px',
@@ -65,7 +63,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
         </div>
       </div>
 
-      {/* Next Recommended Action Banner */}
       {path.next_action && (
         <div style={{
           background: 'linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)',
@@ -101,7 +98,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
         </div>
       )}
 
-      {/* Personalized "What NOT to Do" Warnings */}
       {path.what_not_to_do_warnings && path.what_not_to_do_warnings.length > 0 && (
         <div style={{
           background: '#FEF2F2',
@@ -120,7 +116,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
         </div>
       )}
 
-      {/* Milestones Timeline List */}
       <div style={{ display: 'grid', gap: '2rem' }}>
         {path.milestones.map((m, idx) => {
           const isCompleted = m.status === 'completed';
@@ -160,7 +155,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
                 )}
               </div>
 
-              {/* Target Skills Tags */}
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
                 {m.target_skills.map((skill, sIdx) => (
                   <span key={sIdx} style={{ background: '#F1F5F9', color: '#334155', padding: '0.25rem 0.65rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600 }}>
@@ -169,7 +163,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
                 ))}
               </div>
 
-              {/* Ordered Course Steps */}
               <div style={{ marginBottom: '1.5rem' }}>
                 <h4 style={{ fontSize: '0.95rem', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>
                   Courses — do these in order ↓
@@ -233,7 +226,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
                 </div>
               </div>
 
-              {/* Secondary: YouTube extras */}
               {m.youtube_extras && m.youtube_extras.length > 0 && (
                 <div style={{ marginBottom: '1.5rem', background: '#FEF9F9', border: '1px solid #FECACA', borderRadius: '10px', padding: '1rem 1.25rem' }}>
                   <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#B91C1C', marginBottom: '0.5rem' }}>
@@ -251,7 +243,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
                 </div>
               )}
 
-              {/* Milestone project */}
               {m.project && (
                 <div style={{ marginBottom: '1rem', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '1rem 1.25rem' }}>
                   <div style={{ fontWeight: 700, color: '#15803D', fontSize: '0.9rem' }}>🛠️ {m.project.title}</div>
@@ -260,7 +251,6 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
                 </div>
               )}
 
-              {/* Assessment Trigger */}
               {m.assessment && (
                 <div style={{ background: '#EEF2FF', borderRadius: '10px', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                   <div>

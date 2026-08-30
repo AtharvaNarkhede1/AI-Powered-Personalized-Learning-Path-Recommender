@@ -46,7 +46,6 @@ export default function ChatInterface({ activeCareerId, userId }) {
   return (
     <div style={{ maxWidth: '900px', margin: '2rem auto', padding: '0 1.5rem' }}>
       <div className="glass-card" style={{ padding: '2rem', minHeight: '600px', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', pb: '1rem', borderBottom: '1px solid #E2E8F0' }}>
           <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#EEF2FF', color: '#4F46E5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Bot size={22} />
@@ -57,7 +56,6 @@ export default function ChatInterface({ activeCareerId, userId }) {
           </div>
         </div>
 
-        {/* Message Stream */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '1.5rem', paddingRight: '0.5rem' }}>
           {messages.map((m, idx) => {
             const isUser = m.sender === 'user';
@@ -89,7 +87,6 @@ export default function ChatInterface({ activeCareerId, userId }) {
                     {m.content}
                   </div>
 
-                  {/* Followup Prompt Chips */}
                   {m.followups && m.followups.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.75rem' }}>
                       {m.followups.map((chip, cIdx) => (
@@ -119,7 +116,6 @@ export default function ChatInterface({ activeCareerId, userId }) {
           {loading && <div style={{ color: '#64748B', fontStyle: 'italic', fontSize: '0.85rem' }}>AI Assistant is thinking...</div>}
         </div>
 
-        {/* Quick Suggestion Chips */}
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
           {QUICK_PROMPTS.map((p, idx) => (
             <button
@@ -141,7 +137,6 @@ export default function ChatInterface({ activeCareerId, userId }) {
           ))}
         </div>
 
-        {/* Input Bar */}
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           <input
             type="text"

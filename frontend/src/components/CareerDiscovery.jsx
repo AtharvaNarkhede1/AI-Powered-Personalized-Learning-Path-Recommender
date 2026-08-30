@@ -36,7 +36,6 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
 
   return (
     <div style={{ maxWidth: '1200px', margin: '2rem auto', padding: '0 1.5rem' }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>Top 3 Career Recommendations</h2>
@@ -47,7 +46,6 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
         </button>
       </div>
 
-      {/* Clarification Box (If Ambiguity Detected) */}
       {clarification_needed && !clarificationAnswered && clarification_question && (
         <div style={{
           background: 'linear-gradient(135deg, #FEF3C7 0%, #FFFBEB 100%)',
@@ -92,7 +90,6 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
         </div>
       )}
 
-      {/* Cross-Branch Guidance Banner */}
       {cross_branch_advice && (
         <div style={{
           background: '#EEF2FF',
@@ -111,7 +108,6 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
         </div>
       )}
 
-      {/* Top 3 Match Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.75rem', marginBottom: '3rem' }}>
         {top_matches.map((item, idx) => (
           <div
@@ -158,7 +154,6 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
               {item.match_reason}
             </p>
 
-            {/* Score Breakdown Bars */}
             <div style={{ display: 'grid', gap: '0.6rem', marginBottom: '1.5rem', background: '#F8FAFC', padding: '1rem', borderRadius: '10px' }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '0.2rem' }}>
@@ -181,7 +176,6 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
               </div>
             </div>
 
-            {/* Transferable vs Missing Skills */}
             <div style={{ marginBottom: '1.75rem', fontSize: '0.85rem' }}>
               {item.missing_critical_skills.length > 0 && (
                 <div style={{ marginBottom: '0.5rem', color: '#B91C1C' }}>
@@ -206,7 +200,6 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
         ))}
       </div>
 
-      {/* 3-Way Comparison Modal */}
       {showComparison && (
         <div style={{
           position: 'fixed',
@@ -243,7 +236,7 @@ export default function CareerDiscovery({ discoveryData, profile, onSelectCareer
                   <div key={c.career_id} style={{ background: '#F8FAFC', padding: '1.25rem', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
                     <h4 style={{ fontSize: '1.15rem', color: '#4F46E5', marginBottom: '0.25rem' }}>{c.title}</h4>
                     <div style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '0.75rem' }}>{c.avg_salary_range}</div>
-                    
+
                     <div style={{ marginBottom: '1rem' }}>
                       <strong style={{ fontSize: '0.85rem' }}>Day in the Life:</strong>
                       <p style={{ fontSize: '0.8rem', color: '#475569', marginTop: '0.2rem' }}>{c.day_in_the_life}</p>
