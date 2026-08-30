@@ -1,6 +1,3 @@
-"""
-Career Discovery & Comparison API Endpoints.
-"""
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from app.core.security import get_current_user
@@ -10,18 +7,13 @@ from app.models.schemas import (
 )
 from app.services.career_engine import calculate_career_matches, get_career_detail
 from app.data.taxonomy_data import CAREERS_DATABASE, ENGINEERING_BRANCHES
-
 router = APIRouter(prefix="/api/careers", tags=["Career Discovery"])
-
-
 @router.post("/discover", response_model=CareerDiscoveryResponse)
 def discover_careers(profile: ProfileOnboardingRequest, user=Depends(get_current_user)):
     """Top-3 career matches with profile-match %, clarification questions, and
     cross-branch transition guidance. Persists the (merged) profile."""
     repository.upsert_profile(user["_id"], profile)
     return calculate_career_matches(profile)
-
-
 @router.get("/detail/{career_id}", response_model=CareerDetail)
 def get_career_by_id(career_id: str):
     """Retrieves complete detailed profile for a specific career."""
@@ -29,8 +21,6 @@ def get_career_by_id(career_id: str):
     if not detail:
         raise HTTPException(status_code=404, detail="Career not found")
     return detail
-
-
 @router.post("/compare", response_model=List[CareerDetail])
 def compare_careers(payload: CareerComparisonRequest):
     """Retrieves 2 or 3 careers for side-by-side comparison."""
@@ -40,8 +30,6 @@ def compare_careers(payload: CareerComparisonRequest):
         if d:
             details.append(d)
     return details
-
-
 @router.get("/catalog")
 def get_full_career_catalog():
     """Returns all available careers categorized by engineering branch."""

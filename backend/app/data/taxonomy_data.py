@@ -1,13 +1,3 @@
-"""
-Expanded Multi-Branch Engineering Knowledge Taxonomy & Resource Dataset.
-Includes:
-- 14 Engineering Branches
-- 45+ Deeply Modeled Careers
-- 60+ Modeled Skills & DAG Prerequisite Dependency Graph
-- Top YouTube Channels & Free/Paid Recommended Courses per Domain
-- Diagnostic Assessments & Personalised 'What NOT to Do' Rules
-"""
-
 ENGINEERING_BRANCHES = [
     "Computer Engineering / IT",
     "Electronics & Communication Engineering",
@@ -24,7 +14,6 @@ ENGINEERING_BRANCHES = [
     "Environmental Engineering",
     "Materials / Metallurgy"
 ]
-
 CAREERS_DATABASE = [
     {
         "career_id": "robotics_eng",
@@ -405,8 +394,6 @@ CAREERS_DATABASE = [
         ]
     },
 ]
-
-
 def _career(career_id, title, category, branch_primary, compatible, description, salary, demand,
             responsibilities, required_skills, day, realities, misconceptions, evolution,
             specializations, avoid):
@@ -420,8 +407,6 @@ def _career(career_id, title, category, branch_primary, compatible, description,
         "common_misconceptions": misconceptions, "future_evolution": evolution,
         "emerging_specializations": specializations, "what_not_to_do": avoid,
     }
-
-
 CAREERS_DATABASE += [
     _career(
         "data_eng", "Data Engineer", "Data / Backend", "Computer Engineering / IT",
@@ -637,7 +622,6 @@ CAREERS_DATABASE += [
         ["DON'T reach for a neural network before a baseline and solid EDA.",
          "DON'T report a result without checking assumptions and significance."]),
 ]
-
 SKILLS_DATABASE = {
     "python_core": {
         "id": "python_core",
@@ -999,12 +983,6 @@ SKILLS_DATABASE = {
             }
         ]
     },
-
-    # ---- Previously-referenced-but-missing skills (civil/electrical/automotive/VLSI/cloud) ----
-    # No static resources needed here -- retrieve_and_rank_resources() already injects
-    # dynamic YouTube resources for any skill by name, so these just need real taxonomy
-    # metadata (name/category/prerequisites) to stop skill-gap analysis and career matching
-    # from silently going empty for careers that reference them.
     "aws_cloud": {"id": "aws_cloud", "name": "AWS / Cloud Architecture", "category": "Cloud", "prerequisites": ["linux_sys"], "resources": []},
     "bess_storage": {"id": "bess_storage", "name": "Grid Energy Storage & Battery Tech", "category": "Energy", "prerequisites": ["power_systems"], "resources": []},
     "bim_revit": {"id": "bim_revit", "name": "BIM & Autodesk Revit Structure", "category": "Civil", "prerequisites": [], "resources": []},
@@ -1031,8 +1009,6 @@ SKILLS_DATABASE = {
     "terraform": {"id": "terraform", "name": "Infrastructure as Code (Terraform)", "category": "DevOps", "prerequisites": ["linux_sys"], "resources": []},
     "uvm_verification": {"id": "uvm_verification", "name": "UVM Verification Frameworks", "category": "Semiconductors", "prerequisites": ["verilog_sv"], "resources": []},
     "vehicle_dynamics": {"id": "vehicle_dynamics", "name": "Vehicle Dynamics & Chassis Engineering", "category": "Automotive", "prerequisites": ["matlab_simulink"], "resources": []},
-
-    # ---- Broadened-catalog skills (data / web / security / mech / power / bio / aero / chem / iot / qa) ----
     "sql": {"id": "sql", "name": "SQL & Data Modeling", "category": "Data", "prerequisites": [], "resources": []},
     "data_pipelines": {"id": "data_pipelines", "name": "Data Engineering & ETL Pipelines", "category": "Data", "prerequisites": ["sql", "python_core"], "resources": []},
     "spark_bigdata": {"id": "spark_bigdata", "name": "Distributed Data Processing (Spark)", "category": "Data", "prerequisites": ["data_pipelines"], "resources": []},
@@ -1067,7 +1043,6 @@ SKILLS_DATABASE = {
     "data_viz": {"id": "data_viz", "name": "Data Visualization & Communication", "category": "Data", "prerequisites": ["python_core"], "resources": []},
     "experiment_design": {"id": "experiment_design", "name": "Experiment Design & A/B Testing", "category": "Data", "prerequisites": ["statistics"], "resources": []},
 }
-
 QUIZZES_DATABASE = {
     "python_core": {
         "assessment_id": "quiz_python_core",

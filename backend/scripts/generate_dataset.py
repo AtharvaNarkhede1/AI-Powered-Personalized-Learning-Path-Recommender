@@ -1,50 +1,25 @@
-"""
-Deterministic synthetic course-catalog generator.
-
-Writes `backend/app/data/courses.csv` -- a large, diverse PathWise-style
-engineering course dataset that the ML engine (app/ml/) fits its TF-IDF+SVD
-semantic space and prerequisite DAG on.
-
-Coverage:
-  * every skill in SKILLS_DATABASE, taught across every engineering branch
-    that any career using that skill belongs to (cross-branch coverage)
-  * per-career applied specialisation tracks
-  * each (skill, branch, tier) rung offered as several distinct course
-    "angles" (hands-on / project / theory / crash / exam-prep / industry)
-    so the text has real discriminative signal, not near-duplicates
-
-Run:  python -m scripts.generate_dataset
-Target size ~18,000 rows.
-"""
 from __future__ import annotations
-
 import csv
 import os
 import random
 import sys
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from app.data.taxonomy_data import (  # noqa: E402
+from app.data.taxonomy_data import (  
     CAREERS_DATABASE, SKILLS_DATABASE, ENGINEERING_BRANCHES as ENG_BRANCHES,
 )
-
 SEED = 42
 OUT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "app", "data", "courses.csv")
 TARGET_ROWS = 18000
-
 COLUMNS = [
     "course_id", "branch", "track", "course_title", "difficulty_level", "provider",
     "format", "description", "skills_taught", "tools_covered",
     "prerequisite_course_title", "estimated_hours", "rating", "num_reviews",
     "career_paths", "industry_sectors",
 ]
-
 PROVIDERS = ["NPTEL", "Coursera", "edX", "Udacity", "Pluralsight", "MITx", "Udemy",
              "LinkedIn Learning", "DataCamp", "Great Learning"]
 FREE_PROVIDERS = {"NPTEL", "MITx", "edX"}
-
 TIERS = ["Beginner", "Intermediate", "Advanced", "Capstone"]
 TIER_LABEL = {"Beginner": "Foundations", "Intermediate": "Applied",
               "Advanced": "Advanced", "Capstone": "Capstone"}
@@ -53,8 +28,6 @@ TIER_ADJ = {"Beginner": "a foundational introduction to",
             "Intermediate": "a practical, applied treatment of",
             "Advanced": "an in-depth advanced study of",
             "Capstone": "a portfolio capstone built around"}
-
-# distinct course "angles" -- each shifts vocabulary, format, hours and extra skills
 ANGLES = [
     {"name": "", "fmt": "Video Course", "hmul": 1.0, "extra": [],
      "blurb": "structured lectures with graded assignments and readings"},
@@ -71,15 +44,12 @@ ANGLES = [
     {"name": "Industry Practicum", "fmt": "Instructor-led Live", "hmul": 1.2, "extra": ["industry case studies", "production workflows", "tooling"],
      "blurb": "industry case studies and production workflows taught by practitioners, live cohort"},
 ]
-
 DESC_TEMPLATES = [
     "This course is {adj} {track} for {branch} learners -- {blurb}. You practise {skills} using {tools}. Typical next roles: {careers}.",
     "{track} taught as {blurb}. Aimed at {branch} students and career changers. Core skills: {skills}. Tools: {tools}. Prepares you for work as {careers}.",
     "A {branch}-focused path through {track}. {Blurb_cap}. Covers {skills}; hands-on with {tools}. Graduates move into roles like {careers}.",
     "Learn {track} the applied way -- {blurb}. Skills built: {skills}. Toolchain: {tools}. Relevant careers: {careers}.",
 ]
-
-# skill category -> tools + industry sectors (branch is now computed per-skill)
 CATEGORY_TOOLS = {
     "Software": (["python", "git", "vs code", "pytest"], ["software", "technology"]),
     "Web": (["javascript", "typescript", "react", "node.js", "docker", "postgres"], ["software", "web", "startups"]),
@@ -122,17 +92,11 @@ CATEGORY_HOME_BRANCH = {
     "Chemical": "Chemical Engineering", "Biomedical": "Biomedical Engineering",
     "General": "Computer Engineering / IT",
 }
-
-
 def _skill_name(sid: str) -> str:
     return SKILLS_DATABASE.get(sid, {}).get("name", sid)
-
-
 def _careers_for_skill(sid: str) -> list[str]:
     return [c["title"] for c in CAREERS_DATABASE
             if any(r["skill_id"] == sid for r in c["required_skills"])]
-
-
 def _branches_for_skill(sid: str) -> list[str]:
     """Ordered by importance: skill's home branch + primary branches of careers
     that require it first, then compatible branches. Capped so the dataset stays
@@ -149,28 +113,20 @@ def _branches_for_skill(sid: str) -> list[str]:
         if b not in ordered:
             ordered.append(b)
     return ordered[:5]
-
-
 def _canonical_title(skill: str, tier: str) -> str:
     return f"{skill}: {TIER_LABEL[tier]}"
-
-
 def _course_title(skill: str, tier: str, angle: str) -> str:
     base = _canonical_title(skill, tier)
     return base if not angle else f"{base} — {angle}"
-
-
 def generate_rows() -> list[dict]:
     rnd = random.Random(SEED)
     rows: list[dict] = []
     seen_ids: set[str] = set()
     counter = 0
-
     def new_id() -> str:
         nonlocal counter
         counter += 1
         return f"C{counter:06d}"
-
     def emit_track(track: str, branch: str, cat: str, career_paths: list[str],
                    skill_by_tier: dict, cross_prereq_title: str | None,
                    variants_per_rung: int):
@@ -179,10 +135,6 @@ def generate_rows() -> list[dict]:
         for tier in TIERS:
             canonical = _canonical_title(track, tier)
             prereq_for_tier = (cross_prereq_title or "") if tier == "Beginner" else prev_canonical
-
-            # always include the standard ("") angle with one provider so prereq
-            # titles resolve, then a deterministic sample of distinct
-            # (angle, provider) combos for the rest
             combos = [(a, p) for a in ANGLES for p in PROVIDERS]
             rnd.shuffle(combos)
             std_prov = rnd.choice(PROVIDERS)
@@ -225,16 +177,11 @@ def generate_rows() -> list[dict]:
                     "industry_sectors": "; ".join(sectors),
                 })
             prev_canonical = canonical
-
-    # ---------------------------------------------------------------
-    # 1) skill x branch tracks (cross-branch coverage)
     skill_ids = sorted(SKILLS_DATABASE.keys())
     n_skill_branch = sum(len(_branches_for_skill(s)) for s in skill_ids)
     n_career_specs = len(CAREERS_DATABASE)
-    # ~4 tiers per track; solve variants-per-rung to hit TARGET_ROWS
     vpr = max(4, round(TARGET_ROWS / (4 * (n_skill_branch + n_career_specs))))
     vpr = min(vpr, len(ANGLES) * len(PROVIDERS))
-
     for sid in skill_ids:
         s = SKILLS_DATABASE[sid]
         name = s.get("name", sid)
@@ -252,11 +199,6 @@ def generate_rows() -> list[dict]:
         }
         for branch in _branches_for_skill(sid):
             emit_track(name, branch, cat, _careers_for_skill(sid), skill_by_tier, cross, vpr)
-
-    # ---------------------------------------------------------------
-    # 2) one concrete "role capstone" track per career (a single integrative
-    #    track, not a generic umbrella that would crowd out the real skill
-    #    courses in ranking)
     for c in CAREERS_DATABASE:
         branch = c["branch_primary"]
         first_cat = SKILLS_DATABASE.get(c["required_skills"][0]["skill_id"], {}).get("category", "General")
@@ -269,10 +211,7 @@ def generate_rows() -> list[dict]:
             "Capstone": sk + ["end-to-end portfolio project", "job-readiness review", "technical interview prep"],
         }
         emit_track(track, branch, first_cat, [c["title"]], skill_by_tier, None, vpr)
-
     return rows
-
-
 def main():
     rows = generate_rows()
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
@@ -286,7 +225,5 @@ def main():
     print(f"wrote {len(rows)} courses -> {OUT_PATH}")
     print(f"tracks: {len(tracks)} | branches: {len(branches)} | careers referenced: {len(careers)}")
     print("branches:", ", ".join(branches))
-
-
 if __name__ == "__main__":
     main()

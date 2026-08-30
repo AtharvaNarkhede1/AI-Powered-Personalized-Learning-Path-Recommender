@@ -1,33 +1,15 @@
-"""
-Per-course diagnostic quizzes (3-4 questions each).
-
-Resolution order (cached in Mongo after the first build, per course, forever):
-  1. offline question bank keyed by the course's taxonomy skill / track  (instant, reliable)
-  2. LLM generation                                                      (only if a key works)
-  3. GENERIC study-skills questions                                      (last resort)
-"""
 from __future__ import annotations
-
 import json
 import re
 from typing import Any, Dict, List, Optional
-
 from app.core.config import settings
 from app.data.quiz_bank import GENERIC, SKILL_QUIZ_BANK
 from app.db import repository
-
 _GEMINI_MODELS = ("gemini-flash-latest", "gemini-2.5-flash")
 _NORM = re.compile(r"[^a-z0-9]+")
-
-
 def _norm(s: str) -> str:
     return _NORM.sub(" ", (s or "").lower()).strip()
-
-
-# normalised bank keys -> questions
 _BANK = {_norm(k): v for k, v in SKILL_QUIZ_BANK.items()}
-
-
 def _course_row(course_id: str):
     from app.ml.engine import engine
     engine._require()
@@ -35,8 +17,6 @@ def _course_row(course_id: str):
     if not pos:
         return None
     return engine.catalog.df.iloc[int(pos[0])]
-
-
 def _bank_key_for(track: str, title: str) -> Optional[str]:
     nt = _norm(track)
     if nt in _BANK:
@@ -58,15 +38,8 @@ def _bank_key_for(track: str, title: str) -> Optional[str]:
         if kw and len(kw & titlew) / len(kw) >= 0.6:
             return key
     return None
-
-
 def _with_ids(questions: List[dict]) -> List[dict]:
     return [{"id": f"q{i}", **q} for i, q in enumerate(questions[:4], 1)]
-
-
-# --------------------------------------------------------------------------- #
-#  LLM (opportunistic - both providers may be unavailable)
-# --------------------------------------------------------------------------- #
 def _clean_json(raw: str) -> Optional[dict]:
     raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
     m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
@@ -76,8 +49,6 @@ def _clean_json(raw: str) -> Optional[dict]:
         return json.loads(m.group(0))
     except json.JSONDecodeError:
         return None
-
-
 def _validate(questions: Any) -> List[dict]:
     out: List[dict] = []
     if not isinstance(questions, list):
@@ -100,8 +71,6 @@ def _validate(questions: Any) -> List[dict]:
         out.append({"question_text": text, "options": opts,
                     "correct_option_index": idx, "explanation": str(q.get("explanation", "")).strip()})
     return out
-
-
 def _llm_questions(title: str, skills: str, description: str, difficulty: str) -> List[dict]:
     if not settings.COURSE_QUIZ_LLM or not (settings.GEMINI_API_KEY or settings.OPENAI_API_KEY):
         return []
@@ -140,23 +109,16 @@ def _llm_questions(title: str, skills: str, description: str, difficulty: str) -
     except Exception:
         pass
     return []
-
-
-# --------------------------------------------------------------------------- #
-#  Public
-# --------------------------------------------------------------------------- #
 def get_course_quiz(course_id: str) -> Optional[Dict[str, Any]]:
     cached = repository.get_course_quiz(course_id)
     if cached and cached.get("questions"):
         return cached
-
     row = _course_row(course_id)
     if row is None:
         return None
     title = str(row["course_title"])
     track = str(row["track"])
     skills = str(row["skills_taught"]).replace(";", ", ")
-
     key = _bank_key_for(track, title)
     source = "bank"
     if key:
@@ -166,7 +128,6 @@ def get_course_quiz(course_id: str) -> Optional[Dict[str, Any]]:
         source = "llm" if questions else "generic"
         if not questions:
             questions = _with_ids(GENERIC)
-
     quiz = {
         "id": f"cq_{course_id}", "assessment_id": f"cq_{course_id}", "course_id": course_id,
         "skill_id": f"cq_{course_id}", "skill_name": title,
