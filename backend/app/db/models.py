@@ -91,6 +91,9 @@ class LearningPathDB(Base):
     estimated_total_hours = Column(Integer, default=120)
     estimated_weeks = Column(Integer, default=12)
     job_readiness_score = Column(Float, default=35.0)
+    next_action = Column(JSON, nullable=True)
+    what_not_to_do_warnings = Column(JSON, default=list)
+    track_names = Column(JSON, default=list)
 
     profile = relationship("LearnerProfileDB", back_populates="learning_paths")
     milestones = relationship("MilestoneDB", back_populates="path", cascade="all, delete-orphan", order_by="MilestoneDB.sequence_order")
@@ -101,6 +104,7 @@ class MilestoneDB(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     path_id = Column(String, ForeignKey("learning_paths.id"), nullable=False)
+    milestone_key = Column(String, nullable=False)  # e.g. "ms_1" -- stable within a path, NOT globally unique (unlike `id`)
     sequence_order = Column(Integer, nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
@@ -110,8 +114,21 @@ class MilestoneDB(Base):
     resources = Column(JSON, default=list)  # list of resource objects
     project = Column(JSON, nullable=True)
     assessment = Column(JSON, nullable=True)
+    youtube_extras = Column(JSON, default=list)  # secondary "also on YouTube" list
 
     path = relationship("LearningPathDB", back_populates="milestones")
+
+
+class LearnerModelDB(Base):
+    """Per-learner adaptive ranker state (weights + affinities) updated from feedback."""
+    __tablename__ = "learner_models"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    profile_id = Column(String, ForeignKey("learner_profiles.id"), unique=True, nullable=False)
+    weights = Column(JSON, default=dict)       # factor -> weight
+    affinities = Column(JSON, default=dict)    # "track:X" / "provider:Y" -> delta
+    update_count = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class UserFeedbackDB(Base):

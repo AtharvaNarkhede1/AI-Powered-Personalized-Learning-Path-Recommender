@@ -6,20 +6,71 @@ Categorizes skills into:
 - Minor Gap (gap <= 0.3)
 - Major Gap (gap > 0.3)
 - Missing (current == 0.0)
+
+Proficiency source priority (most trustworthy first):
+1. Quiz-verified proficiency from AssessmentSubmissionDB / SkillProficiencyDB
+   (evidence_source="assessment") -- a real, tested signal.
+2. Semantic similarity between the user's self-reported known_skills and the
+   required skill name (via embedding_service), scaled by self-reported
+   experience level -- replaces the old literal substring match so adjacent/
+   synonymous skills ("JS" vs "JavaScript") count instead of scoring 0.
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.data.taxonomy_data import CAREERS_DATABASE, SKILLS_DATABASE
 from app.models.schemas import SkillGapItem, SkillGapAnalysisResponse, ProfileOnboardingRequest
+from app.ml.engine import engine
+
+SEMANTIC_MATCH_THRESHOLD = 0.55
 
 
-def analyze_skill_gaps(career_id: str, profile: ProfileOnboardingRequest) -> SkillGapAnalysisResponse:
+def _best_match(name: str, candidates) -> float:
+    try:
+        return engine.best_text_sim(name, candidates or [])
+    except Exception:
+        n = name.lower()
+        best = 0.0
+        for c in (candidates or []):
+            cl = str(c).lower()
+            if cl in n or n in cl:
+                best = max(best, 0.75)
+            else:
+                ta, tb = set(n.split()), set(cl.split())
+                if ta and tb:
+                    best = max(best, len(ta & tb) / len(ta | tb))
+        return best
+
+
+def _verified_proficiency(db, profile_id: Optional[str], skill_id: str) -> Optional[float]:
+    """Looks up a quiz/assessment-verified proficiency for this skill, if one exists."""
+    if db is None or not profile_id:
+        return None
+    try:
+        from app.db.models import SkillProficiencyDB
+        row = (
+            db.query(SkillProficiencyDB)
+            .filter(SkillProficiencyDB.profile_id == profile_id, SkillProficiencyDB.skill_id == skill_id)
+            .order_by(SkillProficiencyDB.updated_at.desc())
+            .first()
+        )
+        if row and row.evidence_source == "assessment":
+            return row.current_proficiency
+    except Exception:
+        return None
+    return None
+
+
+def analyze_skill_gaps(
+    career_id: str,
+    profile: ProfileOnboardingRequest,
+    db=None,
+    profile_id: Optional[str] = None,
+) -> SkillGapAnalysisResponse:
     """Computes individual skill gaps for a target career given user's known skills and experience."""
     target_career = next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), CAREERS_DATABASE[0])
-    
-    known_skills_lower = [s.lower() for s in profile.known_skills]
+
     exp_level = profile.experience_level.lower()
 
-    # Base proficiency factor derived from experience level
+    # Base proficiency factor derived from self-reported experience level
     base_prof = 0.5 if "intermediate" in exp_level else (0.75 if "advanced" in exp_level else 0.25)
 
     gaps: List[SkillGapItem] = []
@@ -38,12 +89,18 @@ def analyze_skill_gaps(career_id: str, profile: ProfileOnboardingRequest) -> Ski
         category = tax_info.get("category", "Technical")
         prereqs = tax_info.get("prerequisites", [])
 
-        # Estimate current user proficiency
-        user_has_skill = any(ks in s_name.lower() or s_name.lower() in ks for ks in known_skills_lower)
-        if user_has_skill:
-            curr_level = min(1.0, base_prof + 0.2)
+        # 1. Prefer a quiz/assessment-verified proficiency if we have one
+        verified = _verified_proficiency(db, profile_id, s_id)
+        if verified is not None:
+            curr_level = verified
         else:
-            curr_level = 0.0
+            # 2. Semantic match between any known skill and this required skill
+            match_score = _best_match(s_name, profile.known_skills)
+            if match_score >= SEMANTIC_MATCH_THRESHOLD:
+                # Blend self-reported experience level with how confident the semantic match is
+                curr_level = min(1.0, base_prof + 0.2 * match_score)
+            else:
+                curr_level = 0.0
 
         total_acquired += min(curr_level, req_level)
         gap_delta = round(max(0.0, req_level - curr_level), 2)
@@ -62,7 +119,6 @@ def analyze_skill_gaps(career_id: str, profile: ProfileOnboardingRequest) -> Ski
         for prereq in prereqs:
             prereq_info = SKILLS_DATABASE.get(prereq, {})
             prereq_name = prereq_info.get("name", prereq)
-            # If prerequisite is missing but target skill is being attempted
             if curr_level < 0.3:
                 prereq_warnings.append(f"Prerequisite '{prereq_name}' must be mastered before advancing in '{s_name}'.")
 
@@ -70,7 +126,7 @@ def analyze_skill_gaps(career_id: str, profile: ProfileOnboardingRequest) -> Ski
             skill_id=s_id,
             skill_name=s_name,
             category=category,
-            current_level=curr_level,
+            current_level=round(curr_level, 2),
             required_level=req_level,
             gap_delta=gap_delta,
             status=status,

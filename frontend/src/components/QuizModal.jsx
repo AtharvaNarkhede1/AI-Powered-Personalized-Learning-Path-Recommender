@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, AlertCircle, Award } from 'lucide-react';
 import { api } from '../api/client';
 
-export default function QuizModal({ skillId, onClose, onQuizCompleted }) {
+export default function QuizModal({ skillId, userId, careerId, onClose, onQuizCompleted }) {
   const [quiz, setQuiz] = useState(null);
   const [answers, setAnswers] = useState({});
   const [submissionResult, setSubmissionResult] = useState(null);
@@ -28,7 +28,7 @@ export default function QuizModal({ skillId, onClose, onQuizCompleted }) {
 
   const handleSubmit = async () => {
     try {
-      const res = await api.submitQuiz(quiz.id, answers);
+      const res = await api.submitQuiz(quiz.id, answers, userId, careerId);
       setSubmissionResult(res);
       if (onQuizCompleted) onQuizCompleted(res);
     } catch (err) {

@@ -1,43 +1,55 @@
 """
 Dashboard Analytics & Progress Metrics Router.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 from typing import Optional
+from app.db.database import get_db
+from app.db.models import User
 from app.models.schemas import DashboardMetricsResponse, ProfileOnboardingRequest, NextRecommendedAction
-from app.api.paths import PATH_CACHE
-from app.services.path_generator import generate_learning_path
+from app.ml.engine import engine
+from app.services.skill_gap_engine import analyze_skill_gaps
+from app.services.path_store import get_or_create_profile, get_active_path, save_path
 
 router = APIRouter(prefix="/api/analytics", tags=["Dashboard & Analytics"])
 
 
 @router.post("/dashboard", response_model=DashboardMetricsResponse)
-def get_dashboard_metrics(profile: ProfileOnboardingRequest, target_career_id: Optional[str] = "robotics_eng"):
-    """Returns complete dashboard metrics, skill radar dataset, job readiness, study hours, and active path."""
+def get_dashboard_metrics(profile: ProfileOnboardingRequest, target_career_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """Returns complete dashboard metrics, skill radar dataset, job readiness, study hours, and active
+    path -- all derived from this user's real profile/career instead of hardcoded robotics stub data."""
     career_id = profile.target_career_id or target_career_id or "robotics_eng"
-    
-    path = PATH_CACHE.get(career_id) or generate_learning_path(career_id, profile)
-    PATH_CACHE[career_id] = path
+
+    profile_row = get_or_create_profile(db, profile)
+
+    path = get_active_path(db, profile_row.id, career_id)
+    if not path:
+        path = engine.build_path(db, profile, career_id, profile_id=profile_row.id)
+        save_path(db, profile_row.id, path)
 
     completed_count = sum(1 for m in path.milestones if m.status == "completed")
     total_count = len(path.milestones)
+    completed_hours = sum(m.estimated_hours for m in path.milestones if m.status == "completed")
 
-    # Skill Radar Data
+    # Skill Radar Data -- derived from the real skill-gap analysis for this user's actual
+    # target career (previously a hardcoded robotics skill set shown to every user)
+    gap_analysis = analyze_skill_gaps(career_id, profile, db=db, profile_id=profile_row.id)
     skill_radar = [
-        {"skill": "C++ & ROS 2", "current": 45, "required": 90},
-        {"skill": "Kinematics", "current": 60, "required": 85},
-        {"skill": "Embedded C", "current": 70, "required": 80},
-        {"skill": "Control Systems", "current": 30, "required": 80},
-        {"skill": "Computer Vision", "current": 25, "required": 75}
+        {"skill": g.skill_name, "current": round(g.current_level * 100), "required": round(g.required_level * 100)}
+        for g in gap_analysis.gaps[:6]
     ]
 
+    user = db.query(User).filter(User.id == profile.user_id).first()
+    user_name = (user.full_name if user and user.full_name else profile.user_id)
+
     return DashboardMetricsResponse(
-        user_name="Alex Rivera",
+        user_name=user_name,
         engineering_branch=profile.engineering_branch,
         target_career_title=path.career_title,
         job_readiness_pct=path.job_readiness_score,
         completed_milestones_count=completed_count,
         total_milestones_count=total_count,
-        hours_logged=18.5,
+        hours_logged=float(completed_hours),
         estimated_total_hours=float(path.estimated_total_hours),
         estimated_months_remaining=round(path.estimated_weeks / 4.2, 1),
         next_action=path.next_action,

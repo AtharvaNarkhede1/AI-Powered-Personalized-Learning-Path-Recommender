@@ -1,35 +1,47 @@
 """
-Recommendation Engine Router.
+Course Recommendation Router -- ranked courses from the synthetic catalog.
 """
-from fastapi import APIRouter
-from typing import List, Optional
-from app.models.schemas import ResourceItem, RecommendationRequest, ResourceFeedbackRequest, ProfileOnboardingRequest
-from app.services.recommendation_engine import retrieve_and_rank_resources
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from app.db.database import get_db
+from app.models.schemas import (
+    CourseRecommendationResponse, RecommendationRequest, ResourceFeedbackRequest,
+    ProfileOnboardingRequest,
+)
+from app.ml.engine import engine
+from app.services.path_store import get_or_create_profile, record_feedback
 
 router = APIRouter(prefix="/api/recommendations", tags=["Recommendations"])
 
-# In-memory feedback store for hackathon session
-FEEDBACK_CACHE = {}
 
+@router.post("/resources", response_model=CourseRecommendationResponse)
+def get_course_recommendations(req: RecommendationRequest, db: Session = Depends(get_db)):
+    """Ranks catalog courses against the learner's goal / career and what they already know."""
+    profile = ProfileOnboardingRequest(user_id=req.user_id, target_career_id=req.career_id)
+    profile_row = get_or_create_profile(db, profile)
+    # hydrate the profile from the stored row so the ranker has real context
+    for f in ("engineering_branch", "interests", "known_skills", "experience_level",
+              "hours_per_week", "preferred_format", "target_timeline_months"):
+        setattr(profile, f, getattr(profile_row, f))
+    if not req.career_id and profile_row.target_career_id:
+        req.career_id = profile_row.target_career_id
 
-@router.post("/resources", response_model=List[ResourceItem])
-def get_resource_recommendations(profile: ProfileOnboardingRequest, req: Optional[RecommendationRequest] = None):
-    """Retrieves and ranks candidate learning resources based on user profile and preferences."""
-    career_id = req.career_id if req else None
-    skill_filter = req.skill_filter if req else None
-    return retrieve_and_rank_resources(
-        profile,
-        target_career_id=career_id,
-        skill_filter=skill_filter,
-        feedback_history=FEEDBACK_CACHE
+    return engine.recommend(
+        db, profile, goal_text=req.goal_text, career_id=req.career_id,
+        limit=req.limit, exclude_planned=req.exclude_planned, profile_id=profile_row.id,
     )
 
 
 @router.post("/feedback")
-def submit_resource_feedback(fb: ResourceFeedbackRequest):
-    """Records learner upvote, downvote, dismiss, or completion feedback."""
-    FEEDBACK_CACHE[fb.resource_id] = fb.feedback_type
-    return {
-        "status": "success",
-        "message": f"Feedback '{fb.feedback_type}' recorded for resource {fb.resource_id}."
-    }
+def submit_resource_feedback(fb: ResourceFeedbackRequest, db: Session = Depends(get_db)):
+    """Records feedback and nudges this learner's ranker weights toward what drove the pick."""
+    record_feedback(db, fb.user_id, fb.resource_id, fb.feedback_type, fb.comment)
+    profile_row = get_or_create_profile(db, ProfileOnboardingRequest(user_id=fb.user_id))
+    adaptation = engine.record_feedback(db, profile_row.id, fb.feedback_type, course_id=fb.resource_id)
+    return {"status": "success", "message": f"Feedback '{fb.feedback_type}' recorded.", "adaptation": adaptation}
+
+
+@router.get("/model/{user_id}")
+def get_learner_model(user_id: str, db: Session = Depends(get_db)):
+    profile_row = get_or_create_profile(db, ProfileOnboardingRequest(user_id=user_id))
+    return engine.model_snapshot(db, profile_row.id)

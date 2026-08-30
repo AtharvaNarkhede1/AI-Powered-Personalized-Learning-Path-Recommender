@@ -1,11 +1,12 @@
 import React from 'react';
-import { Compass, BookOpen, LayoutDashboard, MessageSquare, Sparkles, Key, CheckCircle, Zap } from 'lucide-react';
+import { Compass, BookOpen, LayoutDashboard, MessageSquare, Sparkles, CheckCircle, Zap, GraduationCap } from 'lucide-react';
 
-export default function Navbar({ activeTab, setActiveTab, onOpenSettings, llmMode }) {
+export default function Navbar({ activeTab, setActiveTab, llmMode }) {
   const navItems = [
     { id: 'landing', label: 'Overview', icon: Sparkles },
     { id: 'onboarding', label: 'Onboarding', icon: Compass },
     { id: 'discovery', label: 'Career Discovery', icon: Compass },
+    { id: 'courses', label: 'Course Recommendations', icon: GraduationCap },
     { id: 'roadmap', label: 'Learning Roadmap', icon: BookOpen },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'assistant', label: 'AI Assistant', icon: MessageSquare }
@@ -29,7 +30,7 @@ export default function Navbar({ activeTab, setActiveTab, onOpenSettings, llmMod
         justifyContent: 'space-between'
       }}>
         {/* Brand Logo */}
-        <div 
+        <div
           onClick={() => setActiveTab('landing')}
           style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}
         >
@@ -52,7 +53,7 @@ export default function Navbar({ activeTab, setActiveTab, onOpenSettings, llmMod
               CareerPath<span style={{ color: '#4F46E5' }}>AI</span>
             </div>
             <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Gen-Z Learning OS
+              Courses &amp; Learning Paths
             </div>
           </div>
         </div>
@@ -89,10 +90,10 @@ export default function Navbar({ activeTab, setActiveTab, onOpenSettings, llmMod
           })}
         </div>
 
-        {/* Action Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {/* AI Mode Indicator */}
-          <div style={{
+        {/* AI Mode Indicator (read-only; configure keys via backend .env) */}
+        <div
+          title="Set GEMINI_API_KEY or OPENAI_API_KEY in backend/.env to enable a live LLM. Otherwise the grounded offline engine is used."
+          style={{
             display: 'flex',
             alignItems: 'center',
             gap: '0.4rem',
@@ -103,30 +104,10 @@ export default function Navbar({ activeTab, setActiveTab, onOpenSettings, llmMod
             fontSize: '0.75rem',
             fontWeight: 600,
             color: '#047857'
-          }}>
-            <CheckCircle size={14} />
-            <span>{llmMode || 'Offline Grounded Engine'}</span>
-          </div>
-
-          <button
-            onClick={onOpenSettings}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.5rem 0.85rem',
-              borderRadius: '8px',
-              border: '1px solid #CBD5E1',
-              background: '#FFFFFF',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              color: '#334155',
-              cursor: 'pointer'
-            }}
-          >
-            <Key size={15} />
-            API Keys
-          </button>
+          }}
+        >
+          <CheckCircle size={14} />
+          <span>{llmMode || 'Offline Grounded Engine'}</span>
         </div>
       </div>
     </nav>
