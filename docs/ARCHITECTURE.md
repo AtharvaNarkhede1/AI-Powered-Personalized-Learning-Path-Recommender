@@ -2,37 +2,97 @@
 
 ## Stack
 
-- **Backend**: FastAPI + SQLAlchemy (SQLite by default, swap `DATABASE_URL` for Postgres in production). No in-memory caches -- every learner's profile, path, feedback, and assessment history is persisted per-user in the DB (`app/db/models.py`).
-- **Frontend**: React (Vite), single-page tab-based UI in `App.jsx` (no client-side routing).
-- **AI/ML**: local `sentence-transformers` embeddings for semantic skill/interest/career matching (`app/services/embedding_service.py`), with an optional Gemini/OpenAI LLM layer for the chat assistant that falls back to a grounded offline rule engine if no API key is configured.
+- **Backend**: FastAPI. Persistence is **MongoDB Atlas** via PyMongo — there is no
+  ORM and no SQLite. Every user, profile, learning path, progress record,
+  feedback event, assessment, and cached course quiz lives in a collection.
+- **Auth**: email/password. Passwords are bcrypt-hashed; a signed **JWT** (7-day
+  expiry) is issued on register/login and sent as `Authorization: Bearer`. The
+  `get_current_user` dependency (`app/core/security.py`) protects every in-app
+  endpoint.
+- **Frontend**: React + Vite with **react-router**. `AuthContext` holds the JWT
+  (localStorage) and hydrates the user via `GET /api/auth/me`; `AppDataContext`
+  owns profile / discovery / active path / dashboard and always refetches from
+  the server after a mutation. A slim left sidebar (`AppLayout`) replaces the old
+  tab navbar.
+- **AI/ML**: the local TF-IDF + Truncated-SVD engine (`app/ml/`) is unchanged and
+  needs no key. An optional Gemini/OpenAI layer powers the chat assistant, the
+  per-phase path explanation, and (opt-in) per-course quiz generation; all three
+  have grounded offline fallbacks.
 
 ## Backend layout (`backend/app/`)
 
-- `api/` -- FastAPI routers, one per domain: `auth`, `onboarding`, `careers`, `skills`, `recommendations`, `paths`, `assessments`, `assistant`, `analytics`, `system`.
-- `services/` -- business logic, called by routers:
-  - `career_engine.py` -- career discovery/matching (branch fit, semantic interest/skill similarity, experience-vs-required-level fit).
-  - `skill_gap_engine.py` -- per-skill gap analysis; prefers a quiz-verified proficiency (`SkillProficiencyDB`) over the self-reported estimate when one exists.
-  - `graph_engine.py` -- builds the skill prerequisite DAG (NetworkX) and topologically sorts target skills.
-  - `path_generator.py` -- assembles the milestone roadmap from the sorted skill list + ranked resources.
-  - `recommendation_engine.py` -- two-stage resource retrieval + multi-factor ranking (rating, semantic relevance, format/difficulty fit, upvote/downvote feedback).
-  - `adaptive_engine.py` / `readiness_calculator.py` -- readiness scoring; `readiness_calculator` is the source of truth, recomputed from real skill-gap data after a quiz.
-  - `what_not_to_do_engine.py` -- personalized pitfall warnings.
-  - `embedding_service.py` -- local semantic similarity (falls back to substring/token overlap if `sentence-transformers` isn't installed, so the app never hard-crashes on a missing optional dependency).
-  - `youtube_service.py` -- real YouTube Data API v3 results when `YOUTUBE_API_KEY` is set; otherwise a plain search link (no fabricated ratings).
-  - `ai_assistant.py` -- chat assistant, grounded in the user's real profile/career/skill-gap data (Gemini / OpenAI / offline rule engine).
-  - `path_store.py` -- DB persistence helpers (profile upsert, active-path read/write, feedback history) used by the routers instead of module-level caches.
-- `data/taxonomy_data.py` -- the curated static catalog: engineering branches, careers, skills (with YouTube resources), and diagnostic quizzes. This is hand-authored content, not scraped.
-- `db/models.py` -- SQLAlchemy models: `User`, `LearnerProfileDB`, `SkillProficiencyDB`, `LearningPathDB`/`MilestoneDB`, `UserFeedbackDB`, `AssessmentSubmissionDB`, `ChatMessageDB`.
-- `models/schemas.py` -- Pydantic request/response contracts.
+- `core/` — `config.py` (env), `security.py` (hash/verify password, create/decode
+  JWT, `get_current_user`).
+- `db/`
+  - `mongo.py` — the `MongoClient`, collection handles (`users`, `profiles`,
+    `learning_paths`, `path_progress`, `learner_models`, `assessments`,
+    `skill_proficiencies`, `user_feedback`, `course_quizzes`), `ping()` and
+    `ensure_indexes()`.
+  - `repository.py` — all data access: user CRUD, profile upsert / hydration,
+    path save/load (with the `Milestone`/`ResourceItem` ↔ dict mapping),
+    progress get/set, learner-model get/set, assessment + skill-proficiency
+    writes, course-quiz cache.
+- `api/` — routers: `auth`, `onboarding`, `careers`, `skills`, `recommendations`,
+  `paths`, `assessments`, `assistant`, `analytics`, `system`.
+- `services/`
+  - `career_engine.py` — career discovery/matching (branch fit + LSA
+    interest/skill similarity + experience fit; clarification question; cross-
+    branch advice).
+  - `skill_gap_engine.py` — per-skill gap; prefers a quiz-verified proficiency
+    (`skill_proficiencies` collection) over the self-reported estimate.
+  - `progress.py` — `apply_progress()` overlays the learner's
+    `completed_resource_ids` onto a path: sets `resource.completed`, flips a
+    milestone to `completed` when all its courses are done (and back when one is
+    un-done), recomputes readiness as
+    `base + (100 - base) · done_hours / total_hours`, and refreshes `next_action`.
+  - `path_explain.py` — per-phase "why these courses" + an overall overview,
+    from the planner's real `why_now` / driver data (+ LLM if a key is set).
+  - `course_quiz.py` — resolves a per-course quiz: offline `quiz_bank` keyed by
+    the course's taxonomy skill → LLM (only if `COURSE_QUIZ_LLM=true`) → a
+    generic study check. Cached per course in `course_quizzes` forever.
+  - `skill_extract.py` — detect known skills from pasted résumé/bio text
+    (word-boundary hits on skill names + an acronym table + a bounded LSA sweep).
+  - `ai_assistant.py` — chat assistant grounded in the user's real
+    profile/path/gaps/weights (Gemini / OpenAI / offline templating engine).
+  - `youtube_service.py` — real YouTube Data API results when `YOUTUBE_API_KEY`
+    is set, else a plain search link.
+- `ml/` — `catalog` (load + index `courses.csv`), `semantic` (TF-IDF → SVD, hybrid
+  retrieval, cached `.pkl`), `graph` (NetworkX prerequisite DAG), `ranker` (the
+  8-factor model + adaptive per-learner weights), `planner` (path construction),
+  `explain`, `engine` (orchestration).
+- `data/` — `taxonomy_data.py` (20 careers, ~74 skills, 3 hand-authored skill
+  quizzes), `quiz_bank.py` (~31 skill quiz sets for per-course quizzes),
+  `keywords_data.py`, `courses.csv`.
+- `models/schemas.py` — Pydantic request/response contracts.
 
 ## Data flow
 
-1. **Onboarding** (`POST /api/onboarding/{user_id}`) persists a `LearnerProfileDB` row.
-2. **Career discovery** (`POST /api/careers/discover`) scores every career in the static catalog against the profile (branch/interest/skill/experience fit) and returns top matches + clarification question if ambiguous.
-3. **Path generation** (`POST /api/paths/generate/{career_id}`) runs skill-gap analysis -> topological sort -> resource ranking -> milestone grouping, then persists the result. A second call for the same user+career returns the persisted path instead of regenerating (so completed-milestone progress isn't lost).
-4. **Quiz submission** (`POST /api/assessments/submit`) grades the quiz, writes a verified `SkillProficiencyDB` row, and recomputes readiness for that user's own active path only.
-5. **Feedback** (`POST /api/recommendations/feedback`) is persisted per-user and actually changes future resource ranking (upvote/downvote adjust the ranking score).
+1. **Register / login** (`POST /api/auth/register|login`) → bcrypt + JWT; an empty
+   `profiles` doc is created on register.
+2. **Profile** (`POST /api/onboarding/profile`, current user) upserts the
+   `profiles` doc. `POST /api/onboarding/parse-resume` returns detected skills the
+   user confirms client-side.
+3. **Career discovery** (`POST /api/careers/discover`) persists the merged profile
+   and scores every career in the taxonomy.
+4. **Path generation** (`POST /api/paths/generate/{career_id}`) runs skill-gap →
+   track selection → tier walk → prerequisite closure → phasing, persists to
+   `learning_paths`, and returns it with any stored progress overlaid. A second
+   call returns the stored path; `POST /regenerate/{career_id}` discards path +
+   progress and rebuilds.
+5. **Progress** — `POST /paths/progress/{career}/resource/{id}/toggle` and
+   `.../milestone/{key}/toggle` mutate `path_progress.completed_resource_ids`,
+   re-run `apply_progress`, and persist. `POST /paths/courses/{career}/add|remove`
+   edit a milestone's resource list.
+6. **Quiz** (`GET /assessments/course-quiz/{course_id}` → `POST /submit`) grades,
+   writes a verified `skill_proficiencies` doc for the mapped taxonomy skill, and
+   recomputes that path's `base_readiness_score`.
+7. **Feedback** — marking a course done also records a `completed` event that
+   nudges the learner's ranker weights (`learner_models`).
+8. **Dashboard** (`POST /api/analytics/dashboard`) returns readiness, phase
+   counts, hours, skill radar, `recent_courses`, and the progress-overlaid path.
 
-## Known limitations / next steps
+## Notes
 
-See the improvement plan discussed with the maintainer: the static catalog (9 careers, ~45 skills after the taxonomy gap-fill) could be expanded via O*NET/ESCO; course *content* beyond YouTube (Coursera/edX) has no free public catalog API and isn't integrated.
+- No DB migrations — MongoDB is schemaless; new fields are additive.
+- The ML semantic cache (`app/ml/cache/semantic.pkl`) is keyed by the dataset
+  `(mtime, row count)` and rebuilt automatically when `courses.csv` changes.

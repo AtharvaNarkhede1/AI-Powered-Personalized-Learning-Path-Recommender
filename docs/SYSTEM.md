@@ -5,9 +5,25 @@ A local, explainable engine that turns an engineering student's profile into
 path**, with YouTube playlists as a secondary supplement and a data-grounded chat
 assistant on top.
 
-Everything runs offline. No API key is required. `GEMINI_API_KEY` / `OPENAI_API_KEY`
-only upgrade the (already grounded) chat assistant to a live LLM; `YOUTUBE_API_KEY`
-only upgrades the YouTube section from a search link to ranked results.
+The **ML engine** runs entirely offline — no API key. `GEMINI_API_KEY` /
+`OPENAI_API_KEY` only upgrade the (already grounded) chat assistant, the per-phase
+path explanation, and opt-in per-course quiz generation to a live LLM;
+`YOUTUBE_API_KEY` only upgrades the YouTube block from a search link to ranked
+results.
+
+> **v2 (SaaS) — what changed since the sections below were first written.**
+> The app now has real **email/password auth (JWT, bcrypt)** and stores everything
+> in **MongoDB Atlas** (no SQLite, no `user_id` in requests — the JWT identifies
+> the learner). The frontend is a **routed** app (react-router) with a left
+> sidebar, not a tab shell; there is no demo mode. Progress is tracked
+> **per course** (a phase auto-completes when all its courses are done);
+> recommendations can **add/remove** courses and the roadmap can be regenerated;
+> each course has a **3–4 question quiz**; you can **paste a résumé** to detect
+> skills; the assistant is a floating panel that renders markdown.
+> Current, authoritative surface docs: [`../README.md`](../README.md),
+> [`ARCHITECTURE.md`](ARCHITECTURE.md), [`API.md`](API.md).
+> §§ 4–9 (dataset, taxonomy, ML engine, career/skill-gap engines, YouTube,
+> assistant grounding) are still accurate. §§ 2–3, 10–15 are updated inline below.
 
 ---
 
@@ -59,16 +75,21 @@ a synthetic ~18,000-row course catalog.
 
 ```
                          ┌─────────────────────────────────────────────┐
-  React SPA (Vite)  ───▶  │  FastAPI  (app/main.py, 10 routers)          │
-  frontend/src/*         │                                             │
+  React + react-router ─▶ │  FastAPI  (app/main.py, 10 routers)          │
+  frontend/src/*         │  JWT (Bearer) on every in-app request        │
+   AuthContext           │                                             │
+   AppDataContext        │  app/core/security.py  bcrypt + JWT + user   │
                          │  app/api/*      thin HTTP layer              │
                          │  app/services/* career match, skill gap,     │
-                         │                 youtube, ai assistant,       │
-                         │                 path persistence            │
+                         │                 progress, path explain,      │
+                         │                 course quiz, skill extract,  │
+                         │                 youtube, ai assistant        │
                          │  app/ml/*       THE ENGINE  ◀── warmed once  │
                          │  app/data/*     courses.csv + taxonomy       │
-                         │  app/db/*       SQLAlchemy + SQLite          │
-                         └─────────────────────────────────────────────┘
+                         │  app/db/*       mongo.py + repository.py      │
+                         └──────────────────┬──────────────────────────┘
+                                            ▼
+                                   MongoDB Atlas (9 collections)
 
   app/ml/ engine (singleton, built at startup in ~12 s, cached to disk):
 
@@ -97,8 +118,8 @@ no external dependency, no hallucinated course names.
 
 ### 3.1 Startup
 
-1. `uvicorn app.main:app` → `Base.metadata.create_all()` creates the SQLite tables.
-2. `@app.on_event("startup")` calls `engine.warm()`:
+1. `uvicorn app.main:app` → startup pings MongoDB and calls `mongo.ensure_indexes()`.
+2. `@app.on_event("startup")` also calls `engine.warm()`:
    - `load_catalog(courses.csv)` → pandas DataFrame + indices (§6.1)
    - `load_or_fit()` → loads `app/ml/cache/semantic.pkl` if its key
      `(csv_mtime, row_count)` matches, otherwise **fits** the TF-IDF+SVD space
@@ -109,11 +130,18 @@ no external dependency, no hallucinated course names.
 
 ### 3.2 A learner's journey
 
+> **v2:** step 0 is `POST /api/auth/register|login` → JWT. The learner is the
+> token; `LearnerProfileDB` → `profiles` doc, `LearningPathDB`/`MilestoneDB` →
+> the embedded `milestones[]` on the `learning_paths` doc, `path_store` →
+> `repository`. Progress is per-course (`path_progress`), the quiz is per-course
+> (`GET /api/assessments/course-quiz/{course_id}`), and the 👍/👎 step is gone —
+> marking a course done records the `completed` event instead.
+
 ```
-Onboarding wizard  (5 steps)
-        │  POST /api/onboarding/{user_id}   → upserts LearnerProfileDB
+Profile form  (name, branch, interests, skills, prefs)   [+ paste résumé]
+        │  POST /api/onboarding/profile     → upserts the profiles doc
         ▼
-Career Discovery
+Find My Career  (interests / skills / prefs pre-filled, editable)
         │  POST /api/careers/discover       → career_engine.calculate_career_matches
         │        weighted score: branch 30% · interest 35% · skill 25% · experience 10%
         │        semantic similarity comes from the same fitted TF-IDF+SVD space
@@ -142,22 +170,26 @@ Learning Roadmap
         │          3. attach an auto project + a matching quiz per milestone
         │          4. attach YouTube supplements per milestone (real skill names only)
         │          5. compute readiness %, weeks, "what NOT to do" warnings
-        │        → persisted via path_store.save_path (LearningPathDB + MilestoneDB)
+        │        → repository.save_path  (learning_paths doc, milestones embedded)
         ▼
-Take a milestone quiz
-        │  POST /api/assessments/submit
-        │        grade → write SkillProficiencyDB(evidence_source="assessment")
-        │        → re-run skill-gap analysis → update the path's readiness score
+Track it
+        │  toggle a course:  POST /api/paths/progress/{career}/resource/{id}/toggle
+        │        → path_progress.completed_resource_ids; apply_progress re-derives
+        │          milestone status + readiness; a completion also nudges ranker weights
+        │  toggle a phase:   POST /api/paths/progress/{career}/milestone/{key}/toggle
+        │  add/remove:       POST /api/paths/courses/{career}/add | /remove
+        │  regenerate:       POST /api/paths/regenerate/{career}
         ▼
-Give feedback (👍/👎 on a course)
-        │  POST /api/recommendations/feedback
-        │        engine.record_feedback:
-        │          nudge this learner's ranker weights toward/away from the
-        │          factors that actually drove that course (stored in LearnerModelDB)
+Take a per-course quiz  (3–4 questions)
+        │  GET  /api/assessments/course-quiz/{course_id}   (bank → LLM → generic; cached)
+        │  POST /api/assessments/submit  {assessment_id:"cq_<course_id>", ...}
+        │        grade → write skill_proficiencies(evidence_source="assessment")
+        │        → recompute the path's base_readiness_score
         ▼
-Dashboard / Chat
-           POST /api/analytics/dashboard   → readiness, milestone counts, skill radar
-           POST /api/assistant/chat        → grounded answer from the real path/gaps
+Dashboard / Assistant
+           POST /api/analytics/dashboard      → readiness, phases, hours, recent courses, radar
+           GET  /api/paths/explanation/{career} → per-phase "why" + overview
+           POST /api/assistant/chat            → grounded answer from the real path/gaps
 ```
 
 ---
@@ -545,10 +577,18 @@ Assembled from the learner's **real** state:
 - **Offline engine (`_offline_answer`)** — a retrieval + light-templating engine, not
   canned prose. `_classify()` routes the message to an intent:
   `why_path` · `next_step` · `timeline` · `weak_areas` · `avoid` · `day` ·
-  `projects` · `compare` · `default`. Each template pulls the specific real values
-  (e.g. `why_path` cites the first 3 courses and their real `why_now`;
-  `weak_areas` lists the real top-3 gaps and the path courses that close them;
-  `timeline` uses the real `estimated_weeks`).
+  `projects` · `compare` · `default`. Each template pulls specific real values:
+  - **`why_path`** — for the first 4 courses: the prerequisite placement
+    ("Take this after *&lt;real earlier course&gt;*, which it builds on"), the
+    **ranking drivers as percentages** from that course's `factor_contributions`
+    (e.g. "goal match 30% · skill-gap coverage 20% · branch fit 15%"), what it
+    unlocks, and the learner's overall factor weighting;
+  - **`next_step`** — the exact next course, its milestone, its driver %s, unlocks;
+  - **`weak_areas`** — the real top-3 gaps (`current% vs needed%`, status) + the
+    path courses that close them;
+  - **`timeline`** — the real `estimated_weeks`, readiness %, milestones done;
+  - **`avoid` / `day` / `projects`** — straight from the career taxonomy entry and
+    the milestones' auto-generated projects.
 - `suggested_followups` and `referenced_resources` are always dynamic (depend on
   intent + what's in the path). When an LLM answers, the offline engine still
   supplies those.
@@ -557,8 +597,27 @@ Assembled from the learner's **real** state:
 
 ## 10. Inputs & outputs — the REST API
 
-Base URL `http://localhost:8000/api`. No auth enforced; a learner is identified by
-`user_id` in the body (default `"demo_user_1"`). Interactive docs at `/docs`.
+Base URL `http://localhost:8000/api`. Interactive docs at `/docs`.
+
+> **v2:** the learner is identified by a **JWT** (`Authorization: Bearer`), issued
+> by `POST /auth/register` / `POST /auth/login`, **not** by a `user_id` field.
+> Endpoints that took `/{user_id}` are now unauthenticated-body current-user
+> endpoints (e.g. `POST /onboarding/profile`, `GET /onboarding/profile`). The full
+> current endpoint list with request/response shapes is in [`API.md`](API.md);
+> the table below is kept for the field-level detail on `ProfileOnboardingRequest`
+> and the response models, which are unchanged apart from the additions noted.
+>
+> **New since v1:** `GET /auth/me`, `POST /onboarding/parse-resume`,
+> `POST /paths/regenerate/{career_id}`,
+> `POST /paths/progress/{career_id}/resource/{resource_id}/toggle`,
+> `POST /paths/progress/{career_id}/milestone/{milestone_key}/toggle`,
+> `POST /paths/courses/{career_id}/add`, `POST /paths/courses/{career_id}/remove`,
+> `GET /paths/explanation/{career_id}`, `GET /assessments/course-quiz/{course_id}`.
+> **Removed:** `POST /auth/demo-login`,
+> `POST /paths/milestone/{career_id}/complete/{milestone_id}`.
+> `ResourceItem` gained `completed: bool`; `LearningPathResponse` gained
+> `base_readiness_score`; `DashboardMetricsResponse` gained `recent_courses[]` and
+> `has_path`.
 
 ### The core input — `ProfileOnboardingRequest`
 
@@ -647,60 +706,68 @@ Base URL `http://localhost:8000/api`. No auth enforced; a learner is identified 
 
 ---
 
-## 11. Persistence — database models
+## 11. Persistence — MongoDB
 
-SQLAlchemy + SQLite (`backend/learning_path.db`). Tables auto-created on startup;
-**no migrations** — schema changes require deleting the DB file.
+**MongoDB Atlas** via PyMongo. No ORM, no SQLite, **no migrations** (schemaless).
+Connection + collection handles in `app/db/mongo.py`; all reads/writes go through
+`app/db/repository.py`. Indexes are created on startup by `ensure_indexes()`.
 
-| Table | Key columns |
-|---|---|
-| `users` | `id`, `email`, `hashed_password` (stub) |
-| `learner_profiles` | all 15 onboarding fields, `target_career_id`; 1 per user |
-| `skill_proficiencies` | `profile_id`, `skill_id`, `current_proficiency`, `evidence_source` (`self_report` / `assessment` / `project`) — only `assessment` rows are trusted by the gap engine |
-| `learning_paths` | `profile_id`, `career_id`, `is_active`, `job_readiness_score`, `estimated_total_hours/weeks`, `next_action` (JSON), `what_not_to_do_warnings` (JSON), `track_names` (JSON) |
-| `milestones` | `path_id`, `milestone_key`, `sequence_order`, `title`, `target_skills` (JSON), `status`, `estimated_hours`, `resources` (JSON), `project` (JSON), `assessment` (JSON), `youtube_extras` (JSON) |
-| `learner_models` | `profile_id` (unique), `weights` (JSON), `affinities` (JSON), `update_count` — the adaptive ranker state |
-| `user_feedback` | `user_id`, `resource_id`, `feedback_type`, append-only |
-| `assessment_submissions` | `user_id`, `assessment_id`, `skill_id`, `score_percentage`, `answers` (JSON) |
+| Collection | Key fields | Unique index |
+|---|---|---|
+| `users` | `_id` (uuid), `email`, `password_hash` (bcrypt), `full_name` | `email` |
+| `profiles` | `user_id`, the 15 onboarding fields, `target_career_id` | `user_id` |
+| `learning_paths` | `user_id`, `career_id`, `career_title`, `job_readiness_score`, `base_readiness_score`, `milestones[]`, `next_action`, `what_not_to_do_warnings[]`, `track_names[]` | `(user_id, career_id)` |
+| `path_progress` | `user_id`, `career_id`, `completed_resource_ids[]` | `(user_id, career_id)` |
+| `skill_proficiencies` | `user_id`, `skill_id`, `current_proficiency`, `evidence_source` — only `"assessment"` is trusted by the gap engine | `(user_id, skill_id)` |
+| `learner_models` | `user_id`, `weights`, `affinities`, `update_count` — adaptive ranker state | `user_id` |
+| `user_feedback` | `user_id`, `resource_id`, `feedback_type`, append-only | — |
+| `assessments` | `user_id`, `assessment_id`, `skill_id`, `score_percentage`, `answers` | — |
+| `course_quizzes` | `course_id`, `questions[]`, `source`, `matched_skill` — cached per-course quiz | `course_id` |
 
-`app/services/path_store.py` is the persistence layer: `get_or_create_profile`,
-`get_active_path`, `save_path` (upsert — deletes & re-inserts milestone rows),
-`get_feedback_history`, `record_feedback`, and the `Milestone ↔ MilestoneDB` mappers.
+Milestones are stored as an embedded array on the path doc (not a separate
+collection). `repository.save_path` upserts by `(user_id, career_id)`;
+`apply_progress` (`app/services/progress.py`) overlays `path_progress` onto a path
+on every read.
 
 ---
 
 ## 12. Frontend
 
-React 18 + Vite, single-page, tab-based (`frontend/src/App.jsx`), no router.
-`frontend/src/api/client.js` is the fetch wrapper; base URL from
-`VITE_API_BASE_URL` (`.env`) + `/api`.
+React 18 + Vite + **react-router** (`frontend/src/App.jsx` is a `<Routes>` tree).
+`frontend/src/api/client.js` is the fetch wrapper — it attaches the JWT and, on a
+`401`, dispatches `auth:logout`. Two contexts: `AuthContext` (token in
+`localStorage`, hydrates via `GET /auth/me`) and `AppDataContext` (profile /
+discovery / active path / dashboard; always refetches after a mutation).
 
-| Tab / component | What it shows |
+| Route / component | What it shows |
 |---|---|
-| `LandingPage` | pitch: ranked courses → prerequisite-ordered path → YouTube supplements |
-| `OnboardingWizard` | the 5-step profile form; skill/interest autocomplete via `/onboarding/keywords/search` |
-| `CareerDiscovery` | top-3 match cards + clarification question + 3-way compare modal |
-| `RecommendationsView` | goal box, ranked course cards with driver % chips and 👍/👎, an explainer of what the %s mean — **the screen a career selection lands on** |
-| `LearningPathTimeline` | the phased milestones: a numbered, rail-connected ordered course list with "start here / take this after X / prepares you for Y", a distinct "📺 Also recommended on YouTube" block, the milestone project, and a quiz button |
-| `Dashboard` | readiness %, hours, milestone progress, a Recharts current-vs-required skill bar chart |
-| `ChatInterface` | the assistant; quick-prompt chips |
+| `/` `pages/LandingPage` | honest pitch; CTA → register (or `/app` if signed in) |
+| `/login`, `/register` `pages/LoginPage` `RegisterPage` | auth forms |
+| `/app` `components/AppLayout` | left sidebar (Dashboard · Profile · Find My Career · Course Recommendations · Roadmap) + the floating assistant; logo → `/` |
+| `/app/dashboard` `pages/DashboardPage` | readiness %, hours, phase progress, **recent course progress**, skill bar chart |
+| `/app/profile` `pages/ProfilePage` | full profile form + **`ResumeImport`** (paste résumé → detected-skill chips) |
+| `/app/discover` `pages/DiscoverPage` | 3 quick steps (interests / skills+level / prefs), pre-filled from the profile → top-3 match cards + clarification + compare |
+| `/app/courses` `pages/CoursesPage` | goal box + ranked course cards with driver % chips and **Add / Remove from roadmap** (no 👍/👎) |
+| `/app/roadmap` `pages/RoadmapPage` | phases with per-course **done ↔ pending** toggles, per-phase toggle, **Regenerate**, per-course **Quiz**, YouTube block, project, and a bottom **"Why this path works"** AI explanation |
+| `components/AssistantWidget` | fixed top-right button → right-side slide-over chat; replies rendered via `lib/Markdown.jsx` (so `**bold**` renders) |
+| `components/QuizModal` | 3–4 question course quiz |
 
-There is **no API-key UI** — keys live in `backend/.env` only. The nav shows a
-read-only badge with the active LLM mode from `/system/status`.
+No API-key UI, no LLM-mode badge — keys are `backend/.env` only.
 
 ---
 
 ## 13. Configuration
 
-`backend/.env` (copy from `.env.example`). All optional:
+`backend/.env` (copy from `.env.example`).
 
-| Var | Effect if unset |
-|---|---|
-| `GEMINI_API_KEY` / `OPENAI_API_KEY` | assistant uses the grounded offline engine |
-| `YOUTUBE_API_KEY` | YouTube block shows a playlist search link instead of ranked results |
-| `DATABASE_URL` | `sqlite:///./learning_path.db` |
-| `COURSES_CSV` | `app/data/courses.csv` |
-| `ML_CACHE_DIR` | `app/ml/cache` |
+| Var | Required | Effect |
+|---|---|---|
+| `MONGODB_URI` (+ `MONGODB_USERNAME` / `MONGODB_PASSWORD` / `MONGODB_DB`) | **yes** | Atlas connection; DB defaults to `pathfinder` |
+| `SECRET_KEY` | prod | signs JWT access tokens (7-day expiry) |
+| `GEMINI_API_KEY` / `OPENAI_API_KEY` | no | live LLM for assistant + path explanation; else grounded offline engine |
+| `COURSE_QUIZ_LLM` | no | `true` → generate per-course quizzes with the LLM instead of the offline `quiz_bank` |
+| `YOUTUBE_API_KEY` | no | ranked YouTube results instead of a search link |
+| `COURSES_CSV` / `ML_CACHE_DIR` | no | dataset + semantic-cache paths |
 
 Tunable constants in code: `ranker.DEFAULT_WEIGHTS`, `semantic.SVD_COMPONENTS` (240),
 `semantic.TFIDF_MAX_FEATURES` (24000), `semantic.HYBRID_LSA_WEIGHT` (0.55),
@@ -740,11 +807,10 @@ parameters.
 cd backend
 python -m venv venv && venv/Scripts/activate      # Windows;  source venv/bin/activate elsewhere
 pip install -r requirements.txt
-python -m scripts.generate_dataset                 # ~18k rows -> app/data/courses.csv
-python -m scripts.build_cache                       # fit + cache the semantic space
-python -m scripts.eval_recommender                  # 14/14 expected
-cp .env.example .env                                # optional: add GEMINI/OPENAI/YOUTUBE keys
-uvicorn app.main:app --reload --port 8000           # startup log: "[ml.engine] warm complete in ~12s"
+cp .env.example .env                                # REQUIRED: set MONGODB_URI (+ optional AI keys)
+python -m scripts.build_cache                       # fit + cache the semantic space (~12s cold)
+python -m scripts.eval_recommender                  # accuracy gate
+uvicorn app.main:app --reload --port 8000           # log: "[mongo] connected" then "[ml.engine] warm complete"
 #   API docs: http://localhost:8000/docs
 
 # ---- frontend ----
@@ -752,10 +818,11 @@ cd ../frontend
 npm install
 echo "VITE_API_BASE_URL=http://localhost:8000" > .env
 npm run dev
-#   app: http://localhost:5173
+#   app: http://localhost:5173  (register → profile → Find My Career → roadmap)
 ```
 
 **Dependencies** (`requirements.txt`): `fastapi`, `uvicorn`, `pydantic`,
-`sqlalchemy`, `pandas`, `scikit-learn`, `scipy`, `numpy`, `joblib`, `networkx`,
-`requests`; `openai` + `google-generativeai` are optional (assistant only).
-No `torch` / `transformers` / `sentence-transformers`.
+`pymongo`, `dnspython`, `bcrypt`, `pyjwt`, `pandas`, `scikit-learn`, `scipy`,
+`numpy`, `joblib`, `networkx`, `requests`; `openai` + `google-generativeai` are
+optional (assistant / path explanation / opt-in quiz generation).
+No `sqlalchemy`, no `torch` / `transformers` / `sentence-transformers`.

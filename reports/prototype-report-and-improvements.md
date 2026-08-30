@@ -3,11 +3,11 @@
 ## 1. Executive Summary
 
 ### Overview
-Career PathFinder is currently an ambitious, highly functional prototype. It solves the critical problem of "e-learning choice paralysis" for engineering students and career switchers by dynamically generating structured, milestone-based learning roadmaps tailored to their current skill levels and ultimate career goals.
+Career PathFinder is currently an ambitious, highly functional prototype. It solves the critical problem of "e-learning choice paralysis" for engineering students and career switchers by dynamically generating structured, milestone-based learning roadmaps tailored to their current skill levels and ultimate career goals. 
 
 The product currently succeeds in demonstrating its core value proposition: it takes user input (via an onboarding wizard) and outputs a curated, prerequisite-aware timeline of learning resources. The UI is clean (glassmorphism cards, Lucide icons, Recharts) and the backend conceptually separates profiling, skill gap analysis, and path generation well.
 
-However, as a prototype, it feels like a "single-player, single-session utility" rather than a sticky, habitual product. It lacks persistence, collaboration, advanced tracking, micro-interactions, and the deep integrations necessary to become a true "Career OS."
+However, as a prototype, it feels like a "single-player, single-session utility" rather than a sticky, habitual product. It lacks persistence, collaboration, advanced tracking, micro-interactions, and the deep integrations necessary to become a true "Career OS." 
 
 ### Scores (Out of 10)
 * **Overall Prototype Quality:** 7/10 (Excellent execution of the core MVP loop)
@@ -73,7 +73,7 @@ Gen-Z Engineering students, self-taught developers, and career switchers looking
 
 ### Lack of Micro-feedback
 * **Current experience:** Clicking "Complete Milestone" just updates a counter.
-* **Problem:** Doesn't feel rewarding.
+* **Problem:** Doesn't feel rewarding. 
 * **Proposed experience:** Add confetti bursts, unlockable badges, and an immediate visual jump in the Job Readiness score with a satisfying animation.
 * **Benefit:** Gamification increases retention.
 
@@ -167,7 +167,7 @@ Gen-Z Engineering students, self-taught developers, and career switchers looking
 
 ## 9. Dashboard & Analytics Improvements
 
-Currently, the dashboard has basic metrics (`job_readiness_pct`, `hours_logged`).
+Currently, the dashboard has basic metrics (`job_readiness_pct`, `hours_logged`). 
 
 **Missing Dashboards to Build:**
 * **The "Habit" Heatmap:** A GitHub-style contribution graph showing days active. Motivation through streaks.
@@ -181,7 +181,7 @@ Currently, the dashboard has basic metrics (`job_readiness_pct`, `hours_logged`)
 ### 1. The Resource Consumption Workflow
 **Current:** User sees YouTube link → clicks it → opens new tab → watches video → comes back → clicks "Mark Complete".
 **Problems:** Context switching. User might get distracted on YouTube.
-**Proposed:** Embed the YouTube iframe directly inside the platform next to a note-taking widget.
+**Proposed:** Embed the YouTube iframe directly inside the platform next to a note-taking widget. 
 **Benefit:** Traps attention. Higher completion rates.
 
 ### 2. The Feedback Workflow
@@ -198,7 +198,7 @@ If there are 10 "learning path generators" out there, why choose this?
 
 1. **The "Anti-Curriculum" Focus:** Competitors focus on *what to learn*. Differentiate by heavily featuring **"What NOT to do"** (e.g., "Skip Redux, focus on Zustand"). This opinionated, counter-intuitive advice builds cult-like trust.
 2. **Time-Budget Centric:** Ask users: "How many hours do you have this week?" If they say "2 hours", dynamically rearrange the milestone to give them high-impact, 2-hour tasks. Competitors are rigid; you are fluid.
-3. **Heuristic Explainability:** Competitors use black-box LLMs that hallucinate paths. Highlight that your engine uses deterministic graph-theory (`graph_engine.py`) to guarantee prerequisite safety.
+3. **Heuristic Explainability:** Competitors use black-box LLMs that hallucinate paths. Highlight that your engine uses deterministic graph-theory (`graph_engine.py`) to guarantee prerequisite safety. 
 4. **"Bring Your Own Content" (BYOC):** Let users paste a link to a random blog post, have the AI analyze it, and slot it into their roadmap, crediting them for the skills learned.
 
 ---
@@ -312,7 +312,7 @@ You sign up via Google. You drop your resume in. Instantly, you see a dynamic da
 ## 18. Final Recommendations
 
 ### Top Immediate Next Steps
-1. **Stop feature work** until React Router and a real Database/Auth are implemented.
+1. **Stop feature work** until React Router and a real Database/Auth are implemented. 
 2. **Install Zustand** to clean up the frontend state.
 3. **Implement Loading UI** for the path generation delay.
 
