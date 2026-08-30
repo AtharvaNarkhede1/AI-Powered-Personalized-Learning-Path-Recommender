@@ -27,6 +27,27 @@ class TokenResponse(BaseModel):
     full_name: Optional[str] = None
 
 
+class MeResponse(BaseModel):
+    user_id: str
+    email: str
+    full_name: Optional[str] = None
+
+
+class ResumeParseRequest(BaseModel):
+    text: str
+    exclude: List[str] = Field(default_factory=list)
+
+
+class DetectedSkill(BaseModel):
+    name: str
+    confidence: float
+    source: str  # resume | semantic
+
+
+class ResumeParseResponse(BaseModel):
+    detected_skills: List[DetectedSkill]
+
+
 # ---------- Learner Profile ----------
 
 class ProfileOnboardingRequest(BaseModel):
@@ -162,6 +183,7 @@ class ResourceItem(BaseModel):
     skills_covered: List[str]
     rating: float = 4.8
     is_free: bool = True
+    completed: bool = False
     match_reason: Optional[str] = None
     upvotes: int = 0
     downvotes: int = 0
@@ -227,11 +249,33 @@ class NextRecommendedAction(BaseModel):
     urgency: str = "normal"  # high, normal, stretch
 
 
+class AddCourseRequest(BaseModel):
+    course_id: str
+    milestone_key: Optional[str] = None
+
+
+class RemoveCourseRequest(BaseModel):
+    resource_id: str
+    milestone_key: str
+
+
+class PhaseExplanation(BaseModel):
+    milestone_key: str
+    title: str
+    explanation: str
+
+
+class PathExplanationResponse(BaseModel):
+    overview: str
+    phases: List[PhaseExplanation]
+
+
 class LearningPathResponse(BaseModel):
     id: str
     career_id: str
     career_title: str
     job_readiness_score: float
+    base_readiness_score: float = 0.0
     estimated_total_hours: int
     estimated_weeks: int
     hours_per_week: int
@@ -265,6 +309,7 @@ class QuizSubmissionRequest(BaseModel):
     answers: Dict[str, int]  # question_id -> chosen option index
     user_id: str = "demo_user_1"
     career_id: Optional[str] = None  # if set, only this user's path for this career is adapted
+    course_id: Optional[str] = None  # set for a per-course quiz (assessment_id "cq_<course_id>")
 
 
 class QuizSubmissionResponse(BaseModel):
@@ -314,3 +359,5 @@ class DashboardMetricsResponse(BaseModel):
     next_action: NextRecommendedAction
     skill_radar_data: List[Dict[str, Any]]  # [{'skill': 'Python', 'current': 80, 'required': 90}]
     active_path: Optional[LearningPathResponse] = None
+    recent_courses: List[ResourceItem] = Field(default_factory=list)
+    has_path: bool = True

@@ -2,7 +2,9 @@
 Career Discovery & Comparison API Endpoints.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Optional
+from typing import List
+from app.core.security import get_current_user
+from app.db import repository
 from app.models.schemas import (
     CareerDiscoveryResponse, ProfileOnboardingRequest, CareerDetail, CareerComparisonRequest
 )
@@ -13,8 +15,10 @@ router = APIRouter(prefix="/api/careers", tags=["Career Discovery"])
 
 
 @router.post("/discover", response_model=CareerDiscoveryResponse)
-def discover_careers(profile: ProfileOnboardingRequest):
-    """Calculates top 3 career matches with profile-match %, clarification questions, and cross-branch transition guidance."""
+def discover_careers(profile: ProfileOnboardingRequest, user=Depends(get_current_user)):
+    """Top-3 career matches with profile-match %, clarification questions, and
+    cross-branch transition guidance. Persists the (merged) profile."""
+    repository.upsert_profile(user["_id"], profile)
     return calculate_career_matches(profile)
 
 

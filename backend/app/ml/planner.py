@@ -126,7 +126,8 @@ class Planner:
                 if rung not in self.cat.variant_index:
                     continue
                 if is_portfolio(track) and tier < 1:
-                    continue                    # the role portfolio starts at Applied, not Foundations
+                    ctx.satisfied_rungs.add(rung)  # portfolio starts at Applied; don't let
+                    continue                        # prerequisite closure pull its Foundations tier back in
                 if tier < start_tier:
                     ctx.satisfied_rungs.add(rung)
                     waivers.append(f"{track} - {TIER_NAME[tier]} (waived: matches your stated level)")
@@ -188,9 +189,11 @@ class Planner:
                 for pre in self.graph.prereq_rungs(rung) if pre in chosen
             ]
             if prereq_titles:
-                why = f"Take this after {prereq_titles[0]}. {info['headline']}"
+                why = f"Take this after “{prereq_titles[0]}”, which it builds on."
+            elif unlocks:
+                why = f"Start here — it's the foundation for “{unlocks[0]}” later in your path."
             else:
-                why = f"Start here. {info['headline']}"
+                why = "Start here — core groundwork this role depends on."
             items.append(PlanItem(
                 pos=sc.pos, rung=rung, tier=rung[2], score=sc.score,
                 factors=sc.factors, contributions=sc.contributions,

@@ -40,30 +40,21 @@ def _best_match(name: str, candidates) -> float:
         return best
 
 
-def _verified_proficiency(db, profile_id: Optional[str], skill_id: str) -> Optional[float]:
+def _verified_proficiency(user_id: Optional[str], skill_id: str) -> Optional[float]:
     """Looks up a quiz/assessment-verified proficiency for this skill, if one exists."""
-    if db is None or not profile_id:
+    if not user_id:
         return None
     try:
-        from app.db.models import SkillProficiencyDB
-        row = (
-            db.query(SkillProficiencyDB)
-            .filter(SkillProficiencyDB.profile_id == profile_id, SkillProficiencyDB.skill_id == skill_id)
-            .order_by(SkillProficiencyDB.updated_at.desc())
-            .first()
-        )
-        if row and row.evidence_source == "assessment":
-            return row.current_proficiency
+        from app.db import repository
+        return repository.get_verified_proficiency(user_id, skill_id)
     except Exception:
         return None
-    return None
 
 
 def analyze_skill_gaps(
     career_id: str,
     profile: ProfileOnboardingRequest,
-    db=None,
-    profile_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> SkillGapAnalysisResponse:
     """Computes individual skill gaps for a target career given user's known skills and experience."""
     target_career = next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), CAREERS_DATABASE[0])
@@ -90,7 +81,7 @@ def analyze_skill_gaps(
         prereqs = tax_info.get("prerequisites", [])
 
         # 1. Prefer a quiz/assessment-verified proficiency if we have one
-        verified = _verified_proficiency(db, profile_id, s_id)
+        verified = _verified_proficiency(user_id, s_id)
         if verified is not None:
             curr_level = verified
         else:

@@ -1,110 +1,45 @@
 """
-Authentication & Demo User Session API Endpoints.
+Authentication -- email/password registration & login, JWT access tokens.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from app.db.database import get_db
-from app.db.models import User, LearnerProfileDB
-from app.models.schemas import UserCreate, UserLogin, TokenResponse, ProfileResponse
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.security import (
+    create_access_token, get_current_user, hash_password, verify_password,
+)
+from app.db import repository
+from app.models.schemas import MeResponse, TokenResponse, UserCreate, UserLogin
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 
 @router.post("/register", response_model=TokenResponse)
-def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
-    """Registers a new user account."""
-    existing = db.query(User).filter(User.email == user_in.email).first()
-    if existing:
+def register_user(payload: UserCreate):
+    email = payload.email.lower().strip()
+    if not email or not payload.password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+    if repository.get_user_by_email(email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    user = User(
-        email=user_in.email,
-        hashed_password=f"hashed_{user_in.password}",  # Simple hash for hackathon demo
-        full_name=user_in.full_name or "Engineering Learner"
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    # Initialize default profile
-    profile = LearnerProfileDB(
-        user_id=user.id,
-        user_status="Engineering Student",
-        engineering_branch="Computer Engineering / IT",
-        interests=["AI", "Software", "Robotics"],
-        known_skills=["Python", "HTML/CSS"]
-    )
-    db.add(profile)
-    db.commit()
-
+    user = repository.create_user(email, hash_password(payload.password),
+                                  payload.full_name or "Learner")
+    repository.create_empty_profile(user["_id"])
     return TokenResponse(
-        access_token=f"demo_token_{user.id}",
-        user_id=user.id,
-        email=user.email,
-        full_name=user.full_name
+        access_token=create_access_token(user["_id"]),
+        user_id=user["_id"], email=user["email"], full_name=user["full_name"],
     )
 
 
 @router.post("/login", response_model=TokenResponse)
-def login_user(user_in: UserLogin, db: Session = Depends(get_db)):
-    """Logs in an existing user."""
-    user = db.query(User).filter(User.email == user_in.email).first()
-    if not user:
-        # Create quick demo account if not exists for easy testing
-        user = User(
-            email=user_in.email,
-            hashed_password=f"hashed_{user_in.password}",
-            full_name="Engineering Learner"
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        
-        profile = LearnerProfileDB(user_id=user.id)
-        db.add(profile)
-        db.commit()
-
+def login_user(payload: UserLogin):
+    user = repository.get_user_by_email(payload.email)
+    if not user or not verify_password(payload.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     return TokenResponse(
-        access_token=f"demo_token_{user.id}",
-        user_id=user.id,
-        email=user.email,
-        full_name=user.full_name
+        access_token=create_access_token(user["_id"]),
+        user_id=user["_id"], email=user["email"], full_name=user.get("full_name"),
     )
 
 
-@router.post("/demo-login", response_model=TokenResponse)
-def demo_login(db: Session = Depends(get_db)):
-    """Instant one-click Hackathon Demo login."""
-    demo_email = "demo.learner@hcl.edu"
-    user = db.query(User).filter(User.email == demo_email).first()
-    if not user:
-        user = User(
-            email=demo_email,
-            hashed_password="demo_password",
-            full_name="Alex Rivera (Mechanical & Robotics Student)"
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-        profile = LearnerProfileDB(
-            user_id=user.id,
-            user_status="Engineering Student",
-            engineering_branch="Mechanical Engineering",
-            college_name="HCL Institute of Technology",
-            current_year="3rd Year",
-            graduation_year=2026,
-            interests=["Robotics", "AI", "Embedded Systems"],
-            known_skills=["Python", "SolidWorks", "Basic Electronics"],
-            hours_per_week=10,
-            preferred_format="project-based"
-        )
-        db.add(profile)
-        db.commit()
-
-    return TokenResponse(
-        access_token=f"demo_token_{user.id}",
-        user_id=user.id,
-        email=user.email,
-        full_name=user.full_name
-    )
+@router.get("/me", response_model=MeResponse)
+def me(user=Depends(get_current_user)):
+    return MeResponse(user_id=user["_id"], email=user["email"], full_name=user.get("full_name"))

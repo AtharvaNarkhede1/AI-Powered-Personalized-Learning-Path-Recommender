@@ -1,137 +1,129 @@
 """
 Assessments & Diagnostic Quizzes Router.
+
+Two kinds of quiz:
+  - skill quizzes  (hand-authored, GET /quiz/{skill_id})
+  - course quizzes (LLM-generated + cached, GET /course-quiz/{course_id})
+Both submit through POST /submit.
 """
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from app.db.database import get_db
-from app.db.models import AssessmentSubmissionDB, SkillProficiencyDB, LearnerProfileDB
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.security import get_current_user
+from app.data.taxonomy_data import QUIZZES_DATABASE, SKILLS_DATABASE
+from app.db import repository
 from app.models.schemas import (
-    AssessmentDetail, QuizSubmissionRequest, QuizSubmissionResponse, ProfileOnboardingRequest
+    AssessmentDetail, QuizSubmissionRequest, QuizSubmissionResponse,
 )
-from app.data.taxonomy_data import QUIZZES_DATABASE
+from app.services.course_quiz import get_course_quiz
+from app.services.progress import apply_progress
 from app.services.skill_gap_engine import analyze_skill_gaps
-from app.services.path_store import get_active_path, save_path
 
 router = APIRouter(prefix="/api/assessments", tags=["Assessments & Diagnostic Quizzes"])
 
 
 @router.get("/quiz/{skill_id}", response_model=AssessmentDetail)
 def get_quiz_by_skill(skill_id: str):
-    """Retrieves diagnostic quiz for a specific skill."""
     if skill_id not in QUIZZES_DATABASE:
-        # Fallback default quiz
         skill_id = "python_core"
-
     data = QUIZZES_DATABASE[skill_id]
     return AssessmentDetail(
-        id=data["assessment_id"],
-        skill_id=data["skill_id"],
-        skill_name=data["skill_name"],
-        title=data["title"],
-        description=data["description"],
-        questions=data["questions"]
+        id=data["assessment_id"], skill_id=data["skill_id"], skill_name=data["skill_name"],
+        title=data["title"], description=data["description"], questions=data["questions"],
     )
 
 
+@router.get("/course-quiz/{course_id}", response_model=AssessmentDetail)
+def get_quiz_for_course(course_id: str, user=Depends(get_current_user)):
+    quiz = get_course_quiz(course_id)
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Course not found.")
+    return AssessmentDetail(
+        id=quiz["id"], skill_id=quiz["skill_id"], skill_name=quiz["skill_name"],
+        title=quiz["title"], description=quiz["description"], questions=quiz["questions"],
+    )
+
+
+import re as _re
+_NORM = _re.compile(r"[^a-z0-9]+")
+
+
+def _skill_by_name(name: str):
+    """(skill_id, skill_name) for a taxonomy skill matching `name`, else None."""
+    target = _NORM.sub(" ", (name or "").lower()).strip()
+    if not target:
+        return None
+    for sid, s in SKILLS_DATABASE.items():
+        if _NORM.sub(" ", s["name"].lower()).strip() == target:
+            return sid, s["name"]
+    tw = set(target.split())
+    for sid, s in SKILLS_DATABASE.items():
+        sw = set(_NORM.sub(" ", s["name"].lower()).strip().split())
+        if sw and len(tw & sw) / len(sw) >= 0.6:
+            return sid, s["name"]
+    return None
+
+
 @router.post("/submit", response_model=QuizSubmissionResponse)
-def submit_quiz_answers(payload: QuizSubmissionRequest, db: Session = Depends(get_db)):
-    """Grades a quiz submission, persists a verified skill proficiency, and adapts this
-    user's own active path only (previously this looped over every cached path for every
-    user, a cross-user data-bleed bug)."""
-    # Find matching quiz
-    quiz_data = None
-    for sid, qdata in QUIZZES_DATABASE.items():
-        if qdata["assessment_id"] == payload.assessment_id:
-            quiz_data = qdata
-            break
+def submit_quiz_answers(payload: QuizSubmissionRequest, user=Depends(get_current_user)):
+    is_course_quiz = payload.assessment_id.startswith("cq_")
 
-    if not quiz_data:
-        quiz_data = QUIZZES_DATABASE["python_core"]
+    if is_course_quiz:
+        course_id = payload.course_id or payload.assessment_id[3:]
+        quiz = repository.get_course_quiz(course_id) or get_course_quiz(course_id)
+        if not quiz:
+            raise HTTPException(status_code=404, detail="Course quiz not found.")
+        skill_id, skill_name = payload.assessment_id, quiz["skill_name"]
+        questions = quiz["questions"]
+        mapped = _skill_by_name(quiz.get("matched_skill") or quiz["skill_name"])
+    else:
+        quiz = next((q for q in QUIZZES_DATABASE.values() if q["assessment_id"] == payload.assessment_id),
+                    QUIZZES_DATABASE["python_core"])
+        skill_id, skill_name = quiz["skill_id"], quiz["skill_name"]
+        questions = quiz["questions"]
+        mapped = (skill_id, skill_name)
 
-    questions = quiz_data["questions"]
-    correct_count = 0
-    detailed_results = []
-
+    correct = 0
+    detailed = []
     for q in questions:
-        q_id = q["id"]
-        chosen_idx = payload.answers.get(q_id, -1)
-        is_correct = (chosen_idx == q["correct_option_index"])
-        if is_correct:
-            correct_count += 1
-        detailed_results.append({
-            "question_id": q_id,
-            "chosen_index": chosen_idx,
-            "correct_index": q["correct_option_index"],
-            "is_correct": is_correct,
-            "explanation": q["explanation"]
+        chosen = payload.answers.get(q["id"], -1)
+        ok = chosen == q["correct_option_index"]
+        correct += int(ok)
+        detailed.append({
+            "question_id": q["id"], "chosen_index": chosen,
+            "correct_index": q["correct_option_index"], "is_correct": ok,
+            "explanation": q.get("explanation", ""),
         })
 
-    score_pct = round((correct_count / len(questions)) * 100, 1) if questions else 100.0
+    score_pct = round((correct / len(questions)) * 100, 1) if questions else 100.0
     passed = score_pct >= 60.0
     new_prof = 0.85 if score_pct >= 80.0 else (0.65 if score_pct >= 60.0 else 0.4)
+    feedback = (
+        f"You scored {score_pct}%. Nice work on {skill_name}."
+        if passed else
+        f"You scored {score_pct}%. Review this course's material before re-testing."
+    )
 
-    feedback = f"Excellent! You scored {score_pct}%. Your proficiency level in {quiz_data['skill_name']} is updated." if passed else f"You scored {score_pct}%. We recommend reviewing prerequisite modules before re-testing."
+    repository.record_submission(user["_id"], payload.assessment_id, skill_id, score_pct, payload.answers)
+    if mapped:
+        repository.upsert_skill_proficiency(user["_id"], mapped[0], mapped[1], new_prof)
 
-    # Persist the raw submission
-    db.add(AssessmentSubmissionDB(
-        user_id=payload.user_id,
-        assessment_id=quiz_data["assessment_id"],
-        skill_id=quiz_data["skill_id"],
-        score_percentage=score_pct,
-        answers=payload.answers,
-    ))
-
-    # Persist a verified skill proficiency -- this is what skill_gap_engine now
-    # prefers over the self-reported estimate once it exists.
-    profile_row = db.query(LearnerProfileDB).filter(LearnerProfileDB.user_id == payload.user_id).first()
-    if profile_row:
-        prof_row = (
-            db.query(SkillProficiencyDB)
-            .filter(SkillProficiencyDB.profile_id == profile_row.id, SkillProficiencyDB.skill_id == quiz_data["skill_id"])
-            .first()
-        )
-        if not prof_row:
-            prof_row = SkillProficiencyDB(profile_id=profile_row.id, skill_id=quiz_data["skill_id"], skill_name=quiz_data["skill_name"])
-            db.add(prof_row)
-        prof_row.current_proficiency = new_prof
-        prof_row.confidence = 0.9
-        prof_row.evidence_source = "assessment"
-
-    db.commit()
-
-    # Adapt only this user's own active path(s) for this skill's career context,
-    # instead of every cached path for every user.
-    if profile_row:
-        career_id = payload.career_id or profile_row.target_career_id
-        if career_id:
-            path = get_active_path(db, profile_row.id, career_id)
-            if path:
-                context_profile = ProfileOnboardingRequest(
-                    user_id=payload.user_id,
-                    engineering_branch=profile_row.engineering_branch,
-                    known_skills=profile_row.known_skills or [],
-                    experience_level=profile_row.experience_level,
-                    hours_per_week=profile_row.hours_per_week,
-                )
-                try:
-                    gap = analyze_skill_gaps(career_id, context_profile, db=db, profile_id=profile_row.id)
-                    total_req = sum(g.required_level for g in gap.gaps) or 0.1
-                    total_acq = sum(min(g.current_level, g.required_level) for g in gap.gaps)
-                    path.job_readiness_score = round(min(100.0, max(15.0, (total_acq / total_req) * 100)), 1)
-                except Exception:
-                    boost = 5.0 if score_pct >= 80 else (2.5 if score_pct >= 60 else 0.0)
-                    path.job_readiness_score = round(min(100.0, path.job_readiness_score + boost), 1)
-                path.next_action.action_type = "build_project"
-                path.next_action.title = "Build the milestone portfolio project"
-                path.next_action.description = f"You scored {score_pct}% -- apply it in the milestone project."
-                save_path(db, profile_row.id, path)
+    career_id = payload.career_id or repository.profile_request_for(user["_id"]).target_career_id
+    if career_id and mapped:
+        path = repository.get_active_path(user["_id"], career_id)
+        if path:
+            try:
+                gap = analyze_skill_gaps(career_id, repository.profile_request_for(user["_id"]), user_id=user["_id"])
+                total_req = sum(g.required_level for g in gap.gaps) or 0.1
+                total_acq = sum(min(g.current_level, g.required_level) for g in gap.gaps)
+                path.base_readiness_score = round(min(100.0, max(15.0, (total_acq / total_req) * 100)), 1)
+            except Exception:
+                pass
+            completed = repository.get_completed_resource_ids(user["_id"], career_id)
+            path = apply_progress(path, set(completed))
+            repository.save_path(user["_id"], path)
 
     return QuizSubmissionResponse(
-        assessment_id=quiz_data["assessment_id"],
-        skill_id=quiz_data["skill_id"],
-        score_percentage=score_pct,
-        passed=passed,
-        new_proficiency_level=new_prof,
-        feedback=feedback,
-        detailed_results=detailed_results
+        assessment_id=payload.assessment_id, skill_id=skill_id,
+        score_percentage=score_pct, passed=passed, new_proficiency_level=new_prof,
+        feedback=feedback, detailed_results=detailed,
     )

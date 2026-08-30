@@ -1,37 +1,30 @@
 """
 Main FastAPI Application Entrypoint.
-Registers middleware, database startup handlers, and API routers.
+Registers middleware, MongoDB + ML-engine startup, and API routers.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
 
 from app.core.config import settings
-from app.db.database import engine, Base
 from app.api import (
     auth, onboarding, careers, skills, recommendations,
     paths, assessments, assistant, analytics, system
 )
 
-# Create database tables automatically
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
-    description="Industry-Ready AI-Powered Gen-Z Career & Personalized Learning Path Operating System"
+    description="AI-Powered Career & Personalized Learning Path Operating System",
 )
 
-# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API Routers
 app.include_router(auth.router)
 app.include_router(onboarding.router)
 app.include_router(careers.router)
@@ -45,23 +38,24 @@ app.include_router(system.router)
 
 
 @app.on_event("startup")
-def _warm_ml_engine():
-    """Fit the TF-IDF+SVD semantic space and build the prerequisite DAG once."""
+def _startup():
+    from app.db import mongo
+    try:
+        mongo.ping()
+        mongo.ensure_indexes()
+        print(f"[mongo] connected to '{settings.MONGODB_DB}'")
+    except Exception as e:
+        print(f"[mongo] connection failed: {e}")
     try:
         from app.ml.engine import engine
         engine.warm()
-    except Exception as e:  # never block the API from starting
+    except Exception as e:
         print(f"[startup] ML engine warm failed: {e}")
 
 
 @app.get("/")
 def root_status():
-    return {
-        "status": "online",
-        "app": settings.APP_NAME,
-        "version": settings.VERSION,
-        "docs": "/docs"
-    }
+    return {"status": "online", "app": settings.APP_NAME, "version": settings.VERSION, "docs": "/docs"}
 
 
 if __name__ == "__main__":

@@ -27,12 +27,26 @@ logger = logging.getLogger(__name__)
 _FACTOR_PHRASE = {
     "goal_fit": "how closely a course matches your stated goal",
     "skill_gain": "how much of your skill gap a course closes",
+    "branch_fit": "fitting your engineering branch",
     "level_fit": "matching your current level",
     "quality": "course rating and review volume",
     "prereq_ready": "whether you're ready for the prerequisites",
     "effort_fit": "fitting your weekly time budget",
     "format_pref": "your preferred learning format",
 }
+_FACTOR_SHORT = {
+    "goal_fit": "goal match", "skill_gain": "skill-gap coverage", "branch_fit": "branch fit",
+    "level_fit": "level fit", "quality": "rating", "prereq_ready": "prereqs ready",
+    "effort_fit": "time fit", "format_pref": "format",
+}
+
+
+def _driver_line(r: ResourceItem) -> str:
+    """'goal match 41% · skill-gap coverage 22% · level fit 14%' from a course's contributions."""
+    fc = getattr(r, "factor_contributions", None) or {}
+    top = sorted(fc.items(), key=lambda kv: -kv[1])[:3]
+    parts = [f"{_FACTOR_SHORT.get(f, f)} {round(v * 100)}%" for f, v in top if v >= 0.05]
+    return " · ".join(parts)
 
 
 # --------------------------------------------------------------------------- #
@@ -90,8 +104,7 @@ def _collect_grounding(
     profile: Optional[ProfileOnboardingRequest],
     current_path: Optional[LearningPathResponse],
     context_career_id: Optional[str],
-    db=None,
-    profile_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> Grounding:
     career_id = (current_path.career_id if current_path else None) or context_career_id
     if not career_id and profile is not None:
@@ -107,7 +120,7 @@ def _collect_grounding(
     if career_id and profile is not None:
         try:
             from app.services.skill_gap_engine import analyze_skill_gaps
-            analysis = analyze_skill_gaps(career_id, profile, db=db, profile_id=profile_id)
+            analysis = analyze_skill_gaps(career_id, profile, user_id=user_id)
             g.gaps = sorted(analysis.gaps, key=lambda x: x.gap_delta, reverse=True)
             if g.readiness_pct is None:
                 g.readiness_pct = analysis.overall_readiness_pct
@@ -115,10 +128,10 @@ def _collect_grounding(
             logger.debug("skill gap grounding unavailable: %s", e)
 
     # personalised ranker weights
-    if db is not None and profile_id:
+    if user_id:
         try:
             from app.ml.engine import engine
-            snap = engine.model_snapshot(db, profile_id)
+            snap = engine.model_snapshot(user_id)
             g.personalised = bool(snap.get("personalised"))
             weights = sorted(snap.get("weights", []), key=lambda w: w["weight"], reverse=True)
             g.top_factors = [(w["factor"], w["weight"]) for w in weights[:3]]
@@ -183,15 +196,28 @@ _SYSTEM_RULES = (
 )
 
 
+# Google keeps renaming/retiring Gemini models -- "…-latest" always resolves to a
+# current one; the rest are fallbacks. Verify with genai.list_models().
+_GEMINI_MODELS = ("gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash")
+
+
 def _try_llm(message: str, context: str) -> Optional[str]:
     if settings.GEMINI_API_KEY:
         try:
             import google.generativeai as genai
             genai.configure(api_key=settings.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-1.5-flash", system_instruction=_SYSTEM_RULES)
-            resp = model.generate_content(f"LEARNER CONTEXT:\n{context}\n\nQUESTION: {message}")
-            if resp and getattr(resp, "text", None):
-                return resp.text.strip()
+            prompt = f"LEARNER CONTEXT:\n{context}\n\nQUESTION: {message}"
+            last_err = None
+            for name in _GEMINI_MODELS:
+                try:
+                    model = genai.GenerativeModel(name, system_instruction=_SYSTEM_RULES)
+                    resp = model.generate_content(prompt)
+                    if resp and getattr(resp, "text", None):
+                        return resp.text.strip()
+                except Exception as e:
+                    last_err = e
+            if last_err:
+                raise last_err
         except Exception as e:
             logger.warning("Gemini failed, using grounded offline engine: %s", e)
     if settings.OPENAI_API_KEY:
@@ -254,17 +280,28 @@ def _offline_answer(message: str, g: Grounding) -> ChatResponse:
                      "and I'll explain exactly why each course is ordered the way it is.")
             followups = ["How do I pick a career?", "What careers match my profile?"]
         else:
-            first = g.ordered_courses(3)
+            first = g.ordered_courses(4)
             refs = first
-            lines = [f"Your path for **{ct}** is built from {len(g.path.track_names)} track(s): "
-                     f"{', '.join(g.path.track_names)}.", ""]
-            lines.append("The first steps and *why they come first*:")
-            for r in first:
-                lines.append(f"• **{r.title}** — {r.why_now or 'foundational for what follows.'}")
+            lines = [f"Your **{ct}** path is built from {len(g.path.track_names)} skill tracks: "
+                     f"{', '.join(g.path.track_names)}.",
+                     "",
+                     "It's ordered by prerequisite depth — foundations first, then each course "
+                     "feeds the next. Here's each of the first steps and *why it's placed there*:",
+                     ""]
+            for i, r in enumerate(first, 1):
+                lines.append(f"**{i}. {r.title}**  ({r.provider}, ~{r.duration_hours:g} h)")
+                if r.why_now:
+                    lines.append(f"   Placement: {r.why_now.rstrip('.')}.")
+                dl = _driver_line(r)
+                if dl:
+                    lines.append(f"   Why it ranked here: {dl}.")
+                if getattr(r, "unlocks", None):
+                    lines.append(f"   Unlocks: {', '.join(r.unlocks[:2])}.")
+                lines.append("")
             if g.top_factors:
                 fac = ", ".join(f"{_FACTOR_PHRASE.get(f, f)}" for f, _ in g.top_factors)
-                lines += ["", f"Right now your picks are weighted most toward: {fac}. "
-                              f"Thumbs-up / thumbs-down on courses shifts this."]
+                lines += [f"Across all your recommendations, the ranking currently leans most on: "
+                          f"{fac}. Thumbs-up / thumbs-down on any course re-weights this for you."]
             reply = "\n".join(lines)
             followups = ["What should I start with today?", f"What are my weak areas for {ct}?",
                          "How long until I'm job ready?"]
@@ -278,9 +315,12 @@ def _offline_answer(message: str, g: Grounding) -> ChatResponse:
             m, r = nxt
             refs = [r]
             reply = (f"Your next step is **{r.title}** ({r.provider}, ~{r.duration_hours:g} hrs, {r.difficulty}).\n\n"
-                     f"• Why now: {r.why_now or 'it unlocks the rest of ' + m.title}.\n"
+                     f"• Why now: {(r.why_now or 'it unlocks the rest of ' + m.title).rstrip('.')}.\n"
                      f"• It sits in **{m.title}**"
                      + (f", which targets: {', '.join(m.target_skills[:4])}." if m.target_skills else "."))
+            dl = _driver_line(r)
+            if dl:
+                reply += f"\n• Why it ranked here: {dl}."
             if getattr(r, "unlocks", None):
                 reply += f"\n• Finishing it prepares you for: {', '.join(r.unlocks[:2])}."
             followups = ["Why is this course first?", "What project should I build in this milestone?",
@@ -402,10 +442,9 @@ def generate_ai_reply(
     profile: Optional[ProfileOnboardingRequest] = None,
     current_path: Optional[LearningPathResponse] = None,
     context_career_id: Optional[str] = None,
-    db=None,
-    profile_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> ChatResponse:
-    g = _collect_grounding(profile, current_path, context_career_id, db=db, profile_id=profile_id)
+    g = _collect_grounding(profile, current_path, context_career_id, user_id=user_id)
 
     llm_text = _try_llm(message, _grounding_text(g))
     if llm_text:

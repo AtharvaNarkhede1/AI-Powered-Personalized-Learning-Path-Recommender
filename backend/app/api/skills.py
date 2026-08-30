@@ -2,18 +2,18 @@
 Skill Assessment & Gap Analysis Router.
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from app.db.database import get_db
+
+from app.core.security import get_current_user
+from app.db import repository
 from app.models.schemas import SkillGapAnalysisResponse, ProfileOnboardingRequest
 from app.services.skill_gap_engine import analyze_skill_gaps
-from app.services.path_store import get_or_create_profile
 
 router = APIRouter(prefix="/api/skills", tags=["Skills & Gap Analysis"])
 
 
 @router.post("/analyze-gap/{career_id}", response_model=SkillGapAnalysisResponse)
-def analyze_gaps_for_career(career_id: str, profile: ProfileOnboardingRequest, db: Session = Depends(get_db)):
-    """Calculates skill gap delta, status tags (Mastered, Minor Gap, Major Gap, Missing), and prerequisite
-    warnings -- preferring quiz-verified proficiency over the self-reported estimate when one exists."""
-    profile_row = get_or_create_profile(db, profile)
-    return analyze_skill_gaps(career_id, profile, db=db, profile_id=profile_row.id)
+def analyze_gaps_for_career(career_id: str, profile: ProfileOnboardingRequest, user=Depends(get_current_user)):
+    """Skill-gap delta, status tags, and prerequisite warnings -- preferring
+    quiz-verified proficiency over the self-reported estimate when one exists."""
+    repository.upsert_profile(user["_id"], profile)
+    return analyze_skill_gaps(career_id, profile, user_id=user["_id"])

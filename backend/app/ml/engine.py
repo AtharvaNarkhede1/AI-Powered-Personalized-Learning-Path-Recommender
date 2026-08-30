@@ -97,22 +97,22 @@ class Engine:
             bits.append("focus skills: " + ", ".join(gap_names[:8]))
         return ". ".join(bits) or "engineering career skills"
 
-    def _learner_model(self, db, profile_id: Optional[str]):
+    def _learner_model(self, user_id: Optional[str]):
         weights = dict(DEFAULT_WEIGHTS)
         affinities: Dict[str, float] = {}
-        if db is None or not profile_id:
+        if not user_id:
             return weights, affinities, None
         try:
-            from app.db.models import LearnerModelDB
-            row = db.query(LearnerModelDB).filter(LearnerModelDB.profile_id == profile_id).first()
+            from app.db import repository
+            row = repository.get_learner_model(user_id)
             if row:
-                weights.update({k: v for k, v in (row.weights or {}).items() if k in FACTORS})
-                affinities.update(row.affinities or {})
+                weights.update({k: v for k, v in (row.get("weights") or {}).items() if k in FACTORS})
+                affinities.update(row.get("affinities") or {})
             return weights, affinities, row
         except Exception:
             return weights, affinities, None
 
-    def _context(self, profile, career_id, db=None, profile_id=None):
+    def _context(self, profile, career_id, user_id=None):
         self._require()
         from app.services.skill_gap_engine import analyze_skill_gaps
 
@@ -120,7 +120,7 @@ class Engine:
         gap_terms: Dict[str, float] = {}
         gap_names: List[str] = []
         try:
-            gap = analyze_skill_gaps(career_id, profile, db=db, profile_id=profile_id) if career_id else None
+            gap = analyze_skill_gaps(career_id, profile, user_id=user_id) if career_id else None
         except Exception:
             gap = None
         if gap:
@@ -144,7 +144,7 @@ class Engine:
         if gap_names:
             gap_sims = self._query_sims(" . ".join(gap_names))
 
-        weights, affinities, _ = self._learner_model(db, profile_id)
+        weights, affinities, _ = self._learner_model(user_id)
         exp = (getattr(profile, "experience_level", "intermediate") or "intermediate").lower()
         target_tier = EXP_TIER.get(next((k for k in EXP_TIER if k in exp), "intermediate"), 1)
 
@@ -211,19 +211,19 @@ class Engine:
                 break
         return picked
 
-    def recommend(self, db, profile, goal_text: Optional[str] = None,
+    def recommend(self, profile, user_id: Optional[str] = None, goal_text: Optional[str] = None,
                   career_id: Optional[str] = None, limit: int = 12,
-                  exclude_planned: bool = False, profile_id=None) -> dict:
+                  exclude_planned: bool = False) -> dict:
         self._require()
-        ctx, goal_vec, derived_goal, gap, _ = self._context(profile, career_id, db, profile_id)
+        ctx, goal_vec, derived_goal, gap, _ = self._context(profile, career_id, user_id)
         if goal_text:
             goal_vec = self.semantic.encode(goal_text)
             ctx.goal_sims = self._query_sims(goal_text)
             derived_goal = goal_text
 
         exclude: set = set()
-        if exclude_planned and db is not None and profile_id:
-            exclude = self._planned_positions(db, profile_id)
+        if exclude_planned and user_id:
+            exclude = self._planned_positions(user_id)
 
         pool = [p for p in self._candidate_pool(ctx, career_id, goal_vec) if p not in exclude]
         ranked = self.ranker.rank(ctx, pool, limit=limit * 8, one_per_rung=True)
@@ -253,21 +253,29 @@ class Engine:
         results = [self._resource_item(sc.pos, sc) for sc in final]
         return {"goal": derived_goal, "count": len(results), "results": [r.model_dump() for r in results]}
 
-    def _planned_positions(self, db, profile_id) -> set:
+    def _planned_positions(self, user_id) -> set:
         try:
-            from app.db.models import LearningPathDB, MilestoneDB
-            rows = (db.query(MilestoneDB).join(LearningPathDB)
-                    .filter(LearningPathDB.profile_id == profile_id).all())
+            from app.db import repository
             out = set()
-            for m in rows:
-                for r in (m.resources or []):
-                    t = self.catalog.title_index.get(str(r.get("title", "")).strip().lower(), [])
-                    out |= set(t)
+            for title in repository.planned_resource_titles(user_id):
+                out |= set(self.catalog.title_index.get(title, []))
             return out
         except Exception:
             return set()
 
     # ---- resource item mapping ----------------------------------------
+    def resource_for_course_id(self, course_id: str) -> Optional[ResourceItem]:
+        self._require()
+        pos = self.catalog.df.index[self.catalog.df["course_id"] == course_id].tolist()
+        if not pos:
+            return None
+        return self._resource_item(int(pos[0]))
+
+    def tier_for_course_id(self, course_id: str) -> int:
+        self._require()
+        pos = self.catalog.df.index[self.catalog.df["course_id"] == course_id].tolist()
+        return int(self.catalog.tiers[int(pos[0])]) if pos else 0
+
     def _resource_item(self, pos: int, sc=None) -> ResourceItem:
         row = self.catalog.df.iloc[pos]
         cid = str(row["course_id"])
@@ -291,12 +299,12 @@ class Engine:
         return item
 
     # ---- learning path ------------------------------------------------
-    def build_path(self, db, profile, career_id: str, profile_id=None) -> LearningPathResponse:
+    def build_path(self, profile, career_id: str, user_id=None) -> LearningPathResponse:
         self._require()
         from app.data.taxonomy_data import CAREERS_DATABASE
 
         career = next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), CAREERS_DATABASE[0])
-        ctx, goal_vec, goal_text, gap, gap_names = self._context(profile, career["career_id"], db, profile_id)
+        ctx, goal_vec, goal_text, gap, gap_names = self._context(profile, career["career_id"], user_id)
 
         weekly = ctx.weekly_hours
         timeline_weeks = max(4, int(getattr(profile, "target_timeline_months", 6) or 6) * 4)
@@ -331,6 +339,7 @@ class Engine:
         return LearningPathResponse(
             id=f"path_{career['career_id']}", career_id=career["career_id"],
             career_title=career["title"], job_readiness_score=readiness["score"],
+            base_readiness_score=readiness["score"],
             estimated_total_hours=readiness["hours"], estimated_weeks=readiness["weeks"],
             hours_per_week=weekly, milestones=milestones, next_action=next_action,
             what_not_to_do_warnings=warnings, track_names=plan.tracks,
@@ -456,22 +465,19 @@ class Engine:
         return uniq[:4]
 
     # ---- feedback loop --------------------------------------------
-    def record_feedback(self, db, profile_id: Optional[str], event_type: str,
+    def record_feedback(self, user_id: Optional[str], event_type: str,
                         course_id: Optional[str] = None, factors: Optional[dict] = None) -> dict:
         """Nudge this learner's ranker weights toward / away from the factors that
         actually drove the course they reacted to."""
         self._require()
         sign = {"upvote": 1.0, "completed": 0.6, "downvote": -1.0, "dismiss": -0.6}.get(event_type, 0.0)
-        if not sign or db is None or not profile_id:
+        if not sign or not user_id:
             return {"updated": False}
-        try:
-            from app.db.models import LearnerModelDB
-        except Exception:
-            return {"updated": False}
+        from app.db import repository
 
-        weights, affinities, row = self._learner_model(db, profile_id)
+        weights, affinities, row = self._learner_model(user_id)
         if factors is None and course_id:
-            factors = self._stored_contributions(db, profile_id, course_id)
+            factors = self._stored_contributions(user_id, course_id)
         factors = factors or {}
         lr = 0.12
         for f, share in factors.items():
@@ -487,35 +493,24 @@ class Engine:
                 for key in (f"track:{r['track']}", f"provider:{r['provider']}"):
                     affinities[key] = float(np.clip(affinities.get(key, 0.0) + sign * 0.15, -1.0, 1.0))
 
-        if row is None:
-            row = LearnerModelDB(profile_id=profile_id)
-            db.add(row)
-        row.weights = weights
-        row.affinities = affinities
-        row.update_count = (row.update_count or 0) + 1
-        db.commit()
-        return {"updated": True, "weights": weights, "update_count": row.update_count}
+        update_count = ((row or {}).get("update_count", 0) if row else 0) + 1
+        repository.save_learner_model(user_id, weights, affinities, update_count)
+        return {"updated": True, "weights": weights, "update_count": update_count}
 
-    def _stored_contributions(self, db, profile_id, course_id) -> dict:
+    def _stored_contributions(self, user_id, course_id) -> dict:
         try:
-            from app.db.models import LearningPathDB, MilestoneDB
-            rows = (db.query(MilestoneDB).join(LearningPathDB)
-                    .filter(LearningPathDB.profile_id == profile_id).all())
-            for m in rows:
-                for r in (m.resources or []):
-                    if r.get("course_id") == course_id and r.get("factor_contributions"):
-                        return r["factor_contributions"]
+            from app.db import repository
+            return repository.stored_contributions(user_id, course_id)
         except Exception:
-            pass
-        return {}
+            return {}
 
-    def model_snapshot(self, db, profile_id) -> dict:
-        weights, affinities, row = self._learner_model(db, profile_id)
+    def model_snapshot(self, user_id) -> dict:
+        weights, affinities, row = self._learner_model(user_id)
         return {
             "weights": [{"factor": f, "weight": round(weights[f], 3), "default": DEFAULT_WEIGHTS[f],
                          "delta": round(weights[f] - DEFAULT_WEIGHTS[f], 3)} for f in FACTORS],
             "affinities": [{"key": k, "value": round(v, 3)} for k, v in affinities.items()],
-            "update_count": (row.update_count if row else 0),
+            "update_count": ((row or {}).get("update_count", 0) if row else 0),
             "personalised": bool(row),
         }
 

@@ -1,81 +1,85 @@
 /**
- * API Client for interacting with FastAPI Backend endpoints.
+ * API client for the FastAPI backend. Attaches the JWT (if present) to every
+ * request; a 401 dispatches a global "auth:logout" event.
  */
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000') + '/api';
 
+let authToken = null;
+export function setAuthToken(token) {
+  authToken = token || null;
+}
+
 async function fetchJSON(endpoint, options = {}) {
-  const url = `${BASE_URL}${endpoint}`;
   const headers = {
     'Content-Type': 'application/json',
-    ...(options.headers || {})
+    ...(options.headers || {}),
   };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
-  try {
-    const res = await fetch(url, { ...options, headers });
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.detail || `HTTP Error ${res.status}`);
-    }
-    return await res.json();
-  } catch (error) {
-    console.error(`API Error on ${endpoint}:`, error);
-    throw error;
+  const res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent('auth:logout'));
+    throw new Error('Session expired. Please sign in again.');
   }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
 }
+
+const body = (data) => ({ method: 'POST', body: JSON.stringify(data) });
 
 export const api = {
   // Auth
-  demoLogin: () => fetchJSON('/auth/demo-login', { method: 'POST' }),
-  login: (email, password) => fetchJSON('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  
-  // Onboarding & Profile
-  saveOnboardingProfile: (userId, profileData) =>
-    fetchJSON(`/onboarding/${userId}`, { method: 'POST', body: JSON.stringify(profileData) }),
-  getOnboardingProfile: (userId) => fetchJSON(`/onboarding/${userId}`),
-  searchKeywords: (query) => fetchJSON(`/onboarding/keywords/search?q=${encodeURIComponent(query)}`),
+  register: (data) => fetchJSON('/auth/register', body(data)),
+  login: (data) => fetchJSON('/auth/login', body(data)),
+  me: () => fetchJSON('/auth/me'),
 
-  // Careers & Discovery
-  discoverCareers: (profileData) =>
-    fetchJSON('/careers/discover', { method: 'POST', body: JSON.stringify(profileData) }),
-  getCareerDetail: (careerId) => fetchJSON(`/careers/detail/${careerId}`),
-  compareCareers: (careerIds) =>
-    fetchJSON('/careers/compare', { method: 'POST', body: JSON.stringify({ career_ids: careerIds }) }),
-  getCareerCatalog: () => fetchJSON('/careers/catalog'),
+  // Profile
+  getProfile: () => fetchJSON('/onboarding/profile'),
+  saveProfile: (profile) => fetchJSON('/onboarding/profile', body(profile)),
+  searchKeywords: (q) => fetchJSON(`/onboarding/keywords/search?q=${encodeURIComponent(q)}`),
+  parseResume: (text, exclude = []) => fetchJSON('/onboarding/parse-resume', body({ text, exclude })),
 
-  // Skills & Gaps
-  analyzeSkillGaps: (careerId, profileData) =>
-    fetchJSON(`/skills/analyze-gap/${careerId}`, { method: 'POST', body: JSON.stringify(profileData) }),
+  // Careers
+  discoverCareers: (profile) => fetchJSON('/careers/discover', body(profile)),
+  getCareerDetail: (id) => fetchJSON(`/careers/detail/${id}`),
+  compareCareers: (ids) => fetchJSON('/careers/compare', body({ career_ids: ids })),
 
-  // Course Recommendations & Feedback
-  getCourseRecommendations: ({ userId, goalText = null, careerId = null, limit = 12, excludePlanned = false }) =>
-    fetchJSON('/recommendations/resources', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userId, goal_text: goalText, career_id: careerId, limit, exclude_planned: excludePlanned })
-    }),
-  getLearnerModel: (userId) => fetchJSON(`/recommendations/model/${userId}`),
-  submitFeedback: (resourceId, feedbackType, userId, comment = '') =>
-    fetchJSON('/recommendations/feedback', {
-      method: 'POST',
-      body: JSON.stringify({ resource_id: resourceId, feedback_type: feedbackType, user_id: userId, comment })
-    }),
+  // Skills
+  analyzeSkillGaps: (careerId, profile) => fetchJSON(`/skills/analyze-gap/${careerId}`, body(profile)),
 
-  // Learning Path
-  generatePath: (careerId, profileData) =>
-    fetchJSON(`/paths/generate/${careerId}`, { method: 'POST', body: JSON.stringify(profileData) }),
-  completeMilestone: (careerId, milestoneId, profileData) =>
-    fetchJSON(`/paths/milestone/${careerId}/complete/${milestoneId}`, { method: 'POST', body: JSON.stringify(profileData) }),
+  // Recommendations
+  getCourseRecommendations: ({ goalText = null, careerId = null, limit = 12 }) =>
+    fetchJSON('/recommendations/resources', body({ goal_text: goalText, career_id: careerId, limit })),
+  getLearnerModel: () => fetchJSON('/recommendations/model'),
 
-  // Quizzes & Assessments
+  // Learning path
+  generatePath: (careerId, profile) => fetchJSON(`/paths/generate/${careerId}`, body(profile)),
+  regeneratePath: (careerId) => fetchJSON(`/paths/regenerate/${careerId}`, { method: 'POST' }),
+  toggleResource: (careerId, resourceId) =>
+    fetchJSON(`/paths/progress/${careerId}/resource/${resourceId}/toggle`, { method: 'POST' }),
+  toggleMilestone: (careerId, milestoneKey) =>
+    fetchJSON(`/paths/progress/${careerId}/milestone/${milestoneKey}/toggle`, { method: 'POST' }),
+  addCourseToPath: (careerId, courseId, milestoneKey = null) =>
+    fetchJSON(`/paths/courses/${careerId}/add`, body({ course_id: courseId, milestone_key: milestoneKey })),
+  removeCourseFromPath: (careerId, resourceId, milestoneKey) =>
+    fetchJSON(`/paths/courses/${careerId}/remove`, body({ resource_id: resourceId, milestone_key: milestoneKey })),
+  getPathExplanation: (careerId) => fetchJSON(`/paths/explanation/${careerId}`),
+
+  // Quizzes
   getQuiz: (skillId) => fetchJSON(`/assessments/quiz/${skillId}`),
-  submitQuiz: (assessmentId, answers, userId, careerId = null) =>
-    fetchJSON('/assessments/submit', { method: 'POST', body: JSON.stringify({ assessment_id: assessmentId, answers, user_id: userId, career_id: careerId }) }),
+  getCourseQuiz: (courseId) => fetchJSON(`/assessments/course-quiz/${courseId}`),
+  submitQuiz: (assessmentId, answers, careerId = null, courseId = null) =>
+    fetchJSON('/assessments/submit', body({ assessment_id: assessmentId, answers, career_id: careerId, course_id: courseId })),
 
-  // Assistant & Chat
-  sendChatMessage: (message, contextCareerId = null, userId) =>
-    fetchJSON('/assistant/chat', { method: 'POST', body: JSON.stringify({ message, context_career_id: contextCareerId, user_id: userId }) }),
+  // Assistant
+  sendChatMessage: (message, contextCareerId = null) =>
+    fetchJSON('/assistant/chat', body({ message, context_career_id: contextCareerId })),
 
-  // Analytics & System
-  getDashboardMetrics: (profileData, targetCareerId = 'robotics_eng') =>
-    fetchJSON(`/analytics/dashboard?target_career_id=${encodeURIComponent(targetCareerId)}`, { method: 'POST', body: JSON.stringify(profileData) }),
-  getSystemStatus: () => fetchJSON('/system/status')
+  // Analytics
+  getDashboardMetrics: (careerId = null) =>
+    fetchJSON(`/analytics/dashboard${careerId ? `?target_career_id=${encodeURIComponent(careerId)}` : ''}`, { method: 'POST' }),
 };
