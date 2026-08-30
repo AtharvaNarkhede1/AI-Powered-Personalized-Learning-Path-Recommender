@@ -1,19 +1,8 @@
-"""Multi-factor course ranker with per-learner adaptive weights.
-
-score(course) = sum(factor_value * weight) / sum(weights)
-Every result also carries the per-factor contribution share, which the
-explainer turns into "why this" text and the feedback loop uses to decide
-which weight to nudge.
-"""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-
 import numpy as np
-
 from app.ml.catalog import Catalog, Rung
-
 FACTORS = ["goal_fit", "skill_gain", "branch_fit", "level_fit", "quality",
            "prereq_ready", "effort_fit", "format_pref"]
 FACTOR_LABEL = {
@@ -26,24 +15,20 @@ DEFAULT_WEIGHTS = {
     "goal_fit": 0.26, "skill_gain": 0.18, "branch_fit": 0.13, "level_fit": 0.12,
     "quality": 0.10, "prereq_ready": 0.10, "effort_fit": 0.06, "format_pref": 0.05,
 }
-
-
 @dataclass
 class RankingContext:
-    goal_sims: np.ndarray                     # cosine of every course to the goal
-    gap_terms: Dict[str, float]               # lowercased skill term -> gap weight
+    goal_sims: np.ndarray 
+    gap_terms: Dict[str, float]
     target_tier: int
     weekly_hours: int
     preferred_format: str
-    satisfied_rungs: set                      # rungs the learner already has (completed + waived)
+    satisfied_rungs: set 
     preferred_branches: set = field(default_factory=set)
-    home_branch: str = ""                      # the learner's own engineering branch
-    career_branches: set = field(default_factory=set)  # target career's primary + compatible
-    gap_sims: Optional[np.ndarray] = None     # cosine of every course to the gap-profile vector
+    home_branch: str = "" 
+    career_branches: set = field(default_factory=set)
+    gap_sims: Optional[np.ndarray] = None
     weights: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     affinities: Dict[str, float] = field(default_factory=dict)
-
-
 @dataclass
 class ScoredCourse:
     pos: int
@@ -51,14 +36,10 @@ class ScoredCourse:
     factors: Dict[str, float]
     contributions: Dict[str, float]
     rung: Rung
-
-
 def _level_fit(tier: int, target: int) -> float:
     diff = tier - target
     pen = 0.14 * abs(diff) if diff <= 0 else 0.32 * diff
     return float(np.clip(1.0 - pen, 0.0, 1.0))
-
-
 def _skill_gain_tokens(doc_skills: List[str], skills_text: str, gap_terms: Dict[str, float]) -> float:
     if not gap_terms:
         return 0.4
@@ -69,13 +50,10 @@ def _skill_gain_tokens(doc_skills: List[str], skills_text: str, gap_terms: Dict[
         if head and (head in skills_text or any(head in s or s in head for s in doc_skills)):
             hit += w
     return float(np.clip(hit / total, 0.0, 1.0))
-
-
 class Ranker:
     def __init__(self, catalog: Catalog, graph):
         self.cat = catalog
         self.graph = graph
-
     def _prereq_ready(self, rung: Rung, satisfied: set) -> float:
         if rung not in self.graph.g:
             return 1.0
@@ -84,7 +62,6 @@ class Ranker:
             return 1.0
         met = sum(1 for p in preds if p in satisfied)
         return float(0.25 + 0.75 * (met / len(preds)))
-
     def rank(self, ctx: RankingContext, positions: List[int], limit: int = 12,
              exclude: set | None = None, one_per_rung: bool = True) -> List[ScoredCourse]:
         exclude = exclude or set()
@@ -92,18 +69,14 @@ class Ranker:
         if not positions:
             return []
         weights = {f: ctx.weights.get(f, DEFAULT_WEIGHTS[f]) for f in FACTORS}
-        # pure goal search (no branch/career context): branch_fit carries no
-        # signal, so hand its weight to goal_fit instead of diluting the score
         if not ctx.home_branch and not ctx.career_branches:
             weights["goal_fit"] += weights["branch_fit"]
             weights["branch_fit"] = 0.0
         wsum = sum(weights.values()) or 1.0
-
         pool_goal_max = max((ctx.goal_sims[p] for p in positions), default=1.0) or 1.0
         pool_gap_max = 1.0
         if ctx.gap_sims is not None:
             pool_gap_max = max((ctx.gap_sims[p] for p in positions), default=1.0) or 1.0
-
         scored: List[ScoredCourse] = []
         for p in positions:
             row = self.cat.df.iloc[p]
@@ -138,7 +111,6 @@ class Ranker:
             rowsum = sum(weighted.values()) or 1.0
             contrib = {f: weighted[f] / rowsum for f in FACTORS}
             scored.append(ScoredCourse(pos=p, score=score, factors=fv, contributions=contrib, rung=rung))
-
         scored.sort(key=lambda s: -s.score)
         if one_per_rung:
             seen, out = set(), []

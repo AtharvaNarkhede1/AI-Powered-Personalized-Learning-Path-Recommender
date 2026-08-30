@@ -1,29 +1,17 @@
-"""
-Per-phase "why these courses" explanation for a learning path + an overall
-overview. Uses the LLM if an API key is set, otherwise a grounded template built
-from the planner's real `why_now` / driver data and the career taxonomy.
-"""
 from __future__ import annotations
-
 from typing import List, Optional
-
 from app.core.config import settings
 from app.data.taxonomy_data import CAREERS_DATABASE
 from app.models.schemas import (
     LearningPathResponse, PathExplanationResponse, PhaseExplanation,
 )
-
 _FACTOR_SHORT = {
     "goal_fit": "goal match", "skill_gain": "skill-gap coverage", "branch_fit": "branch fit",
     "level_fit": "level fit", "quality": "course rating", "prereq_ready": "prerequisite readiness",
     "effort_fit": "time fit", "format_pref": "format match",
 }
-
-
 def _career(career_id: str):
     return next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), None)
-
-
 def _phase_template(path: LearningPathResponse, m) -> str:
     skills = ", ".join(m.target_skills[:4]) or "core skills for this phase"
     lines = [f"**{m.title}** focuses on {skills}."]
@@ -32,7 +20,6 @@ def _phase_template(path: LearningPathResponse, m) -> str:
     lead = m.resources[0] if m.resources else None
     if lead and lead.why_now:
         lines.append(f"You start with *{lead.title}* — {lead.why_now.rstrip('.')}.")
-    # driver rationale for the first couple of courses
     for r in m.resources[:2]:
         fc = r.factor_contributions or {}
         top = sorted(fc.items(), key=lambda kv: -kv[1])[:2]
@@ -45,8 +32,6 @@ def _phase_template(path: LearningPathResponse, m) -> str:
     if unlocks:
         lines.append(f"Finishing this phase prepares you for: {', '.join(list(dict.fromkeys(unlocks))[:3])}.")
     return " ".join(lines)
-
-
 def _overview_template(path: LearningPathResponse) -> str:
     career = _career(path.career_id)
     tracks = ", ".join(path.track_names) if path.track_names else "the required skill tracks"
@@ -61,8 +46,6 @@ def _overview_template(path: LearningPathResponse) -> str:
         txt += (" The sequence is anchored to what the role actually does day to day: "
                 + "; ".join(career["key_responsibilities"][:2]) + ".")
     return txt
-
-
 def _try_llm_phase(career_title: str, phase_title: str, course_titles: List[str],
                    why_now: Optional[str]) -> Optional[str]:
     if not (settings.GEMINI_API_KEY or settings.OPENAI_API_KEY):
@@ -101,8 +84,6 @@ def _try_llm_phase(career_title: str, phase_title: str, course_titles: List[str]
     except Exception:
         return None
     return None
-
-
 def build_path_explanation(path: LearningPathResponse) -> PathExplanationResponse:
     phases: List[PhaseExplanation] = []
     for m in path.milestones:
@@ -112,5 +93,4 @@ def build_path_explanation(path: LearningPathResponse) -> PathExplanationRespons
             m.resources[0].why_now if m.resources else None,
         ) or _phase_template(path, m)
         phases.append(PhaseExplanation(milestone_key=m.id, title=m.title, explanation=text))
-
     return PathExplanationResponse(overview=_overview_template(path), phases=phases)

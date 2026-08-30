@@ -1,31 +1,16 @@
-"""
-Data-access layer over MongoDB. Every router talks to the database through these
-functions -- there is no ORM and no other persistence.
-"""
 from __future__ import annotations
-
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
 from app.db import mongo
 from app.models.schemas import (
     LearningPathResponse, Milestone, NextRecommendedAction, ProfileOnboardingRequest,
     ProfileResponse, ResourceItem,
 )
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
 def _uuid() -> str:
     return str(uuid.uuid4())
-
-
-# --------------------------------------------------------------------------- #
-#  Users
-# --------------------------------------------------------------------------- #
 def create_user(email: str, password_hash: str, full_name: str) -> Dict[str, Any]:
     doc = {
         "_id": _uuid(),
@@ -36,27 +21,16 @@ def create_user(email: str, password_hash: str, full_name: str) -> Dict[str, Any
     }
     mongo.users.insert_one(doc)
     return doc
-
-
 def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     return mongo.users.find_one({"email": email.lower().strip()})
-
-
 def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     return mongo.users.find_one({"_id": user_id})
-
-
-# --------------------------------------------------------------------------- #
-#  Profile
-# --------------------------------------------------------------------------- #
 _PROFILE_FIELDS = (
     "user_status", "engineering_branch", "college_name", "current_year",
     "graduation_year", "interests", "career_goal_status", "target_career_id",
     "known_skills", "experience_level", "hours_per_week", "preferred_format",
     "learning_style", "max_budget", "target_timeline_months",
 )
-
-
 def _profile_response(doc: Dict[str, Any]) -> ProfileResponse:
     return ProfileResponse(
         id=doc.get("_id", doc["user_id"]),
@@ -78,8 +52,6 @@ def _profile_response(doc: Dict[str, Any]) -> ProfileResponse:
         target_timeline_months=doc.get("target_timeline_months", 6),
         updated_at=doc.get("updated_at"),
     )
-
-
 def create_empty_profile(user_id: str) -> None:
     if mongo.profiles.find_one({"user_id": user_id}):
         return
@@ -88,20 +60,13 @@ def create_empty_profile(user_id: str) -> None:
         "interests": [], "known_skills": [],
         "updated_at": _now(),
     })
-
-
 def get_profile(user_id: str) -> Optional[ProfileResponse]:
     doc = mongo.profiles.find_one({"user_id": user_id})
     return _profile_response(doc) if doc else None
-
-
 def get_profile_doc(user_id: str) -> Optional[Dict[str, Any]]:
     return mongo.profiles.find_one({"user_id": user_id})
-
-
 def upsert_profile(user_id: str, payload: ProfileOnboardingRequest) -> ProfileResponse:
     update = {f: getattr(payload, f) for f in _PROFILE_FIELDS}
-    # never wipe an existing target career with a null
     if update.get("target_career_id") is None:
         update.pop("target_career_id")
     update["updated_at"] = _now()
@@ -111,8 +76,6 @@ def upsert_profile(user_id: str, payload: ProfileOnboardingRequest) -> ProfileRe
         upsert=True,
     )
     return get_profile(user_id)
-
-
 def profile_request_for(user_id: str) -> ProfileOnboardingRequest:
     """Hydrate a ProfileOnboardingRequest from the stored profile (for the engines)."""
     doc = mongo.profiles.find_one({"user_id": user_id}) or {}
@@ -121,8 +84,6 @@ def profile_request_for(user_id: str) -> ProfileOnboardingRequest:
         if doc.get(f) is not None:
             data[f] = doc[f]
     return ProfileOnboardingRequest(**data)
-
-
 def set_target_career(user_id: str, career_id: str) -> None:
     mongo.profiles.update_one(
         {"user_id": user_id},
@@ -130,11 +91,6 @@ def set_target_career(user_id: str, career_id: str) -> None:
          "$setOnInsert": {"_id": _uuid(), "user_id": user_id}},
         upsert=True,
     )
-
-
-# --------------------------------------------------------------------------- #
-#  Learning paths
-# --------------------------------------------------------------------------- #
 def _milestone_to_doc(m: Milestone) -> dict:
     return {
         "id": m.id,
@@ -150,8 +106,6 @@ def _milestone_to_doc(m: Milestone) -> dict:
         "assessment": m.assessment,
         "youtube_extras": [r.model_dump() for r in m.youtube_extras],
     }
-
-
 def _milestone_from_doc(d: dict) -> Milestone:
     return Milestone(
         id=d["id"],
@@ -167,8 +121,6 @@ def _milestone_from_doc(d: dict) -> Milestone:
         assessment=d.get("assessment"),
         youtube_extras=[ResourceItem(**r) for r in (d.get("youtube_extras") or [])],
     )
-
-
 def _path_from_doc(doc: Dict[str, Any]) -> LearningPathResponse:
     milestones = [_milestone_from_doc(m) for m in (doc.get("milestones") or [])]
     na = doc.get("next_action")
@@ -191,17 +143,11 @@ def _path_from_doc(doc: Dict[str, Any]) -> LearningPathResponse:
         what_not_to_do_warnings=doc.get("what_not_to_do_warnings", []) or [],
         track_names=doc.get("track_names", []) or [],
     )
-
-
 def get_active_path(user_id: str, career_id: str) -> Optional[LearningPathResponse]:
     doc = mongo.learning_paths.find_one({"user_id": user_id, "career_id": career_id})
     return _path_from_doc(doc) if doc else None
-
-
 def list_paths(user_id: str) -> List[LearningPathResponse]:
     return [_path_from_doc(d) for d in mongo.learning_paths.find({"user_id": user_id})]
-
-
 def save_path(user_id: str, path: LearningPathResponse) -> None:
     doc = {
         "user_id": user_id,
@@ -223,21 +169,12 @@ def save_path(user_id: str, path: LearningPathResponse) -> None:
         {"$set": doc, "$setOnInsert": {"_id": _uuid()}},
         upsert=True,
     )
-
-
 def delete_path(user_id: str, career_id: str) -> None:
     mongo.learning_paths.delete_one({"user_id": user_id, "career_id": career_id})
     mongo.path_progress.delete_one({"user_id": user_id, "career_id": career_id})
-
-
-# --------------------------------------------------------------------------- #
-#  Progress
-# --------------------------------------------------------------------------- #
 def get_completed_resource_ids(user_id: str, career_id: str) -> List[str]:
     doc = mongo.path_progress.find_one({"user_id": user_id, "career_id": career_id})
     return list(doc.get("completed_resource_ids", [])) if doc else []
-
-
 def set_completed_resource_ids(user_id: str, career_id: str, ids: List[str]) -> None:
     mongo.path_progress.update_one(
         {"user_id": user_id, "career_id": career_id},
@@ -245,15 +182,8 @@ def set_completed_resource_ids(user_id: str, career_id: str, ids: List[str]) -> 
          "$setOnInsert": {"_id": _uuid()}},
         upsert=True,
     )
-
-
-# --------------------------------------------------------------------------- #
-#  Learner model (adaptive ranker weights)
-# --------------------------------------------------------------------------- #
 def get_learner_model(user_id: str) -> Optional[Dict[str, Any]]:
     return mongo.learner_models.find_one({"user_id": user_id})
-
-
 def save_learner_model(user_id: str, weights: dict, affinities: dict, update_count: int) -> None:
     mongo.learner_models.update_one(
         {"user_id": user_id},
@@ -262,11 +192,6 @@ def save_learner_model(user_id: str, weights: dict, affinities: dict, update_cou
          "$setOnInsert": {"_id": _uuid()}},
         upsert=True,
     )
-
-
-# --------------------------------------------------------------------------- #
-#  Assessments / verified skill proficiency
-# --------------------------------------------------------------------------- #
 def record_submission(user_id: str, assessment_id: str, skill_id: str,
                       score_percentage: float, answers: dict) -> None:
     mongo.assessments.insert_one({
@@ -274,8 +199,6 @@ def record_submission(user_id: str, assessment_id: str, skill_id: str,
         "skill_id": skill_id, "score_percentage": score_percentage,
         "answers": answers, "created_at": _now(),
     })
-
-
 def upsert_skill_proficiency(user_id: str, skill_id: str, skill_name: str,
                              proficiency: float, evidence_source: str = "assessment") -> None:
     mongo.skill_proficiencies.update_one(
@@ -285,8 +208,6 @@ def upsert_skill_proficiency(user_id: str, skill_id: str, skill_name: str,
          "$setOnInsert": {"_id": _uuid()}},
         upsert=True,
     )
-
-
 def get_verified_proficiency(user_id: str, skill_id: str) -> Optional[float]:
     if not user_id:
         return None
@@ -294,26 +215,17 @@ def get_verified_proficiency(user_id: str, skill_id: str) -> Optional[float]:
     if row and row.get("evidence_source") == "assessment":
         return row.get("current_proficiency")
     return None
-
-
-# --------------------------------------------------------------------------- #
-#  Feedback
-# --------------------------------------------------------------------------- #
 def record_feedback(user_id: str, resource_id: str, feedback_type: str,
                     comment: Optional[str] = None) -> None:
     mongo.user_feedback.insert_one({
         "_id": _uuid(), "user_id": user_id, "resource_id": resource_id,
         "feedback_type": feedback_type, "comment": comment, "created_at": _now(),
     })
-
-
 def get_course_quiz(course_id: str) -> Optional[Dict[str, Any]]:
     doc = mongo.course_quizzes.find_one({"course_id": course_id})
     if doc:
         doc.pop("_id", None)
     return doc
-
-
 def save_course_quiz(course_id: str, quiz: Dict[str, Any]) -> None:
     mongo.course_quizzes.update_one(
         {"course_id": course_id},
@@ -321,8 +233,6 @@ def save_course_quiz(course_id: str, quiz: Dict[str, Any]) -> None:
          "$setOnInsert": {"_id": _uuid()}},
         upsert=True,
     )
-
-
 def planned_resource_titles(user_id: str) -> List[str]:
     out: List[str] = []
     for p in mongo.learning_paths.find({"user_id": user_id}):
@@ -331,8 +241,6 @@ def planned_resource_titles(user_id: str) -> List[str]:
                 if r.get("title"):
                     out.append(str(r["title"]).strip().lower())
     return out
-
-
 def stored_contributions(user_id: str, course_id: str) -> dict:
     for p in mongo.learning_paths.find({"user_id": user_id}):
         for m in (p.get("milestones") or []):

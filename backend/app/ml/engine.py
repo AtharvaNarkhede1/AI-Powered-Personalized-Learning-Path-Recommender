@@ -1,15 +1,7 @@
-"""The engine: warms the catalog/semantic/graph once, then serves course
-recommendations and prerequisite-ordered learning paths in API shapes.
-
-Import as:  from app.ml.engine import engine
-"""
 from __future__ import annotations
-
 import time
 from typing import Dict, List, Optional
-
 import numpy as np
-
 from app.core.config import settings
 from app.ml.catalog import Catalog, TIER_NAME, load_catalog
 from app.ml.graph import PrereqGraph, build_graph
@@ -19,10 +11,7 @@ from app.ml.semantic import SemanticSpace, load_or_fit
 from app.models.schemas import (
     LearningPathResponse, Milestone, NextRecommendedAction, ResourceItem,
 )
-
 EXP_TIER = {"beginner": 0, "intermediate": 1, "advanced": 2}
-
-
 class Engine:
     def __init__(self) -> None:
         self.catalog: Optional[Catalog] = None
@@ -31,8 +20,6 @@ class Engine:
         self.ranker: Optional[Ranker] = None
         self.planner: Optional[Planner] = None
         self._ready = False
-
-    # ---- lifecycle ---------------------------------------------------------
     def warm(self) -> None:
         if self._ready:
             return
@@ -46,20 +33,15 @@ class Engine:
         print(f"[ml.engine] warm complete in {time.time() - t0:.2f}s "
               f"({len(self.catalog)} courses, {len(self.graph.g)} rungs, "
               f"{len(self.graph.unresolved)} unresolved prereqs)")
-
     def _require(self) -> None:
         if not self._ready:
             self.warm()
-
-    # ---- text similarity for the other services --------------------------
     def text_sim(self, a: str, b: str) -> float:
         self._require()
         return self.semantic.text_similarity(a, b)
-
     def best_text_sim(self, query: str, candidates) -> float:
         self._require()
         return self.semantic.best_text_similarity(query, candidates)
-
     def _query_sims(self, text: str) -> np.ndarray:
         """Hybrid similarity of every course to `text`, with pseudo-relevance
         feedback for short queries: the skill tokens of the initial top matches
@@ -76,8 +58,6 @@ class Engine:
         expanded = text + " " + " ".join(dict.fromkeys(toks))
         sims2 = self.semantic.hybrid_to_courses(expanded)
         return np.clip(0.55 * sims + 0.45 * sims2, 0.0, 1.0)
-
-    # ---- goal + context -------------------------------------------------
     def interpret_profile(self, profile, career_id: Optional[str] = None,
                           gap_names: Optional[List[str]] = None) -> str:
         from app.data.taxonomy_data import CAREERS_DATABASE
@@ -96,7 +76,6 @@ class Engine:
         if gap_names:
             bits.append("focus skills: " + ", ".join(gap_names[:8]))
         return ". ".join(bits) or "engineering career skills"
-
     def _learner_model(self, user_id: Optional[str]):
         weights = dict(DEFAULT_WEIGHTS)
         affinities: Dict[str, float] = {}
@@ -115,7 +94,6 @@ class Engine:
     def _context(self, profile, career_id, user_id=None):
         self._require()
         from app.services.skill_gap_engine import analyze_skill_gaps
-
         gap = None
         gap_terms: Dict[str, float] = {}
         gap_names: List[str] = []
@@ -135,19 +113,15 @@ class Engine:
                 for r in c["required_skills"]:
                     gap_terms[r["name"].lower()] = 0.5
                     gap_names.append(r["name"])
-
         goal_text = self.interpret_profile(profile, career_id, gap_names)
         goal_vec = self.semantic.encode(goal_text)
         goal_sims = self._query_sims(goal_text)
-
         gap_sims = None
         if gap_names:
             gap_sims = self._query_sims(" . ".join(gap_names))
-
         weights, affinities, _ = self._learner_model(user_id)
         exp = (getattr(profile, "experience_level", "intermediate") or "intermediate").lower()
         target_tier = EXP_TIER.get(next((k for k in EXP_TIER if k in exp), "intermediate"), 1)
-
         home_branch = getattr(profile, "engineering_branch", "") or ""
         career_branches: set = set()
         if career_id:
@@ -159,7 +133,6 @@ class Engine:
         preferred = set(career_branches)
         if home_branch:
             preferred.add(home_branch)
-
         ctx = RankingContext(
             goal_sims=goal_sims, gap_terms=gap_terms, gap_sims=gap_sims,
             target_tier=target_tier, preferred_branches=preferred,
@@ -169,8 +142,6 @@ class Engine:
             satisfied_rungs=set(), weights=weights, affinities=affinities,
         )
         return ctx, goal_vec, goal_text, gap, gap_names
-
-    # ---- recommendations ------------------------------------------------
     def _candidate_pool(self, ctx: RankingContext, career_id: Optional[str],
                         goal_vec: Optional[np.ndarray] = None) -> List[int]:
         cat = self.catalog
@@ -181,8 +152,6 @@ class Engine:
             if c:
                 pool |= set(cat.career_index.get(c["title"].lower(), []))
         pool |= {int(p) for p in np.argsort(-ctx.goal_sims)[:2500]}
-        # seed every position of the ~50 tracks whose centroid is closest to the
-        # goal, so the pool covers enough *distinct* skill areas to fill the list
         if goal_vec is not None and self.planner is not None:
             tsim = sorted(
                 ((float(np.dot(cen, goal_vec)), key) for key, cen in self.planner._track_centroids.items()),
@@ -192,7 +161,6 @@ class Engine:
                 pool |= set(cat.track_index.get(key, []))
         pool = [p for p in pool if not str(cat.df.iloc[p]["track"]).endswith("Portfolio")]
         return sorted(pool)
-
     def _mmr(self, ranked, limit: int, lam: float = 0.72):
         """Greedy MMR: keep the ranked order but skip a course too similar (in the
         LSA space) to one already picked, so the list isn't 10 near-identical rows."""
@@ -203,14 +171,13 @@ class Engine:
                 max_sim = max(float(v @ pv) for pv in picked_vecs)
             else:
                 max_sim = 0.0
-            if max_sim > 0.93:          # essentially the same course
+            if max_sim > 0.93:
                 continue
             picked.append(sc)
             picked_vecs.append(v)
             if len(picked) >= limit:
                 break
         return picked
-
     def recommend(self, profile, user_id: Optional[str] = None, goal_text: Optional[str] = None,
                   career_id: Optional[str] = None, limit: int = 12,
                   exclude_planned: bool = False) -> dict:
@@ -220,16 +187,12 @@ class Engine:
             goal_vec = self.semantic.encode(goal_text)
             ctx.goal_sims = self._query_sims(goal_text)
             derived_goal = goal_text
-
         exclude: set = set()
         if exclude_planned and user_id:
             exclude = self._planned_positions(user_id)
 
         pool = [p for p in self._candidate_pool(ctx, career_id, goal_vec) if p not in exclude]
         ranked = self.ranker.rank(ctx, pool, limit=limit * 8, one_per_rung=True)
-
-        # at most one course per track (its most relevant tier) so the list is
-        # <limit> distinct skill areas, then MMR to drop near-identical vectors
         seen_track, dedup = set(), []
         for sc in ranked:
             tr = str(self.catalog.df.iloc[sc.pos]["track"]).lower()
@@ -238,10 +201,6 @@ class Engine:
             seen_track.add(tr)
             dedup.append(sc)
         final = self._mmr(dedup, limit)
-
-        # quality gate: keep the first `keep_min` (already score-ranked) plus any
-        # later ones still genuinely close to the goal -- better a short strong
-        # list than one padded with weak matches
         if final:
             keep_min = min(2, len(final))
             best_sim = max(ctx.goal_sims[sc.pos] for sc in final)
@@ -249,10 +208,8 @@ class Engine:
             final = [sc for i, sc in enumerate(final)
                      if i < keep_min
                      or (ctx.goal_sims[sc.pos] >= 0.30 * best_sim and sc.score >= 0.52 * best_score)]
-
         results = [self._resource_item(sc.pos, sc) for sc in final]
         return {"goal": derived_goal, "count": len(results), "results": [r.model_dump() for r in results]}
-
     def _planned_positions(self, user_id) -> set:
         try:
             from app.db import repository
@@ -262,20 +219,16 @@ class Engine:
             return out
         except Exception:
             return set()
-
-    # ---- resource item mapping ----------------------------------------
     def resource_for_course_id(self, course_id: str) -> Optional[ResourceItem]:
         self._require()
         pos = self.catalog.df.index[self.catalog.df["course_id"] == course_id].tolist()
         if not pos:
             return None
         return self._resource_item(int(pos[0]))
-
     def tier_for_course_id(self, course_id: str) -> int:
         self._require()
         pos = self.catalog.df.index[self.catalog.df["course_id"] == course_id].tolist()
         return int(self.catalog.tiers[int(pos[0])]) if pos else 0
-
     def _resource_item(self, pos: int, sc=None) -> ResourceItem:
         row = self.catalog.df.iloc[pos]
         cid = str(row["course_id"])
@@ -297,20 +250,13 @@ class Engine:
             item.match_reason = info["headline"]
             item.factor_contributions = {k: round(v, 3) for k, v in sc.contributions.items()}
         return item
-
-    # ---- learning path ------------------------------------------------
     def build_path(self, profile, career_id: str, user_id=None) -> LearningPathResponse:
         self._require()
         from app.data.taxonomy_data import CAREERS_DATABASE
-
         career = next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), CAREERS_DATABASE[0])
         ctx, goal_vec, goal_text, gap, gap_names = self._context(profile, career["career_id"], user_id)
-
         weekly = ctx.weekly_hours
         timeline_weeks = max(4, int(getattr(profile, "target_timeline_months", 6) or 6) * 4)
-
-        # guarantee the learner's biggest skill gaps get a dedicated track, then
-        # the role-portfolio track, then similarity fills the rest
         must_tracks: List[str] = []
         for name in gap_names[:5]:
             key = name.lower()
@@ -319,14 +265,11 @@ class Engine:
                     must_tracks.append(tname)
                     break
         must_tracks.append(f"{career['title'].lower()} portfolio")
-
         plan: LearningPlan = self.planner.build_plan(
             ctx, goal_vec, weekly, timeline_weeks, ctx.target_tier, must_tracks=must_tracks)
-
         milestones = self._plan_to_milestones(plan, weekly)
         readiness = self._readiness(gap, profile)
         warnings = self._warnings(profile, career, gap.gaps if gap else [])
-
         first = milestones[0].resources[0] if milestones and milestones[0].resources else None
         next_action = NextRecommendedAction(
             action_type="start_course",
@@ -344,20 +287,15 @@ class Engine:
             hours_per_week=weekly, milestones=milestones, next_action=next_action,
             what_not_to_do_warnings=warnings, track_names=plan.tracks,
         )
-
     def _plan_to_milestones(self, plan: LearningPlan, weekly: int) -> List[Milestone]:
         from app.data.taxonomy_data import QUIZZES_DATABASE, SKILLS_DATABASE
         from app.ml.planner import PHASE_DESC, PHASE_TITLES
-
         real_skill_names = {s["name"].lower() for s in SKILLS_DATABASE.values()}
-
         by_phase: Dict[int, list] = {}
         for it in plan.items:
             by_phase.setdefault(it.phase, []).append(it)
-
-        # split a big phase into balanced "(Part N)" milestones (no tiny tails)
         import math
-        groups: List[tuple] = []          # (phase, part_index, items)
+        groups: List[tuple] = []
         for phase in sorted(by_phase):
             ph_items = by_phase[phase]
             if len(ph_items) <= 7:
@@ -367,7 +305,6 @@ class Engine:
             size = math.ceil(len(ph_items) / k)
             for i in range(0, len(ph_items), size):
                 groups.append((phase, i // size + 1, ph_items[i:i + size]))
-
         milestones: List[Milestone] = []
         for seq, (phase, part, items) in enumerate(groups, start=1):
             resources: List[ResourceItem] = []
@@ -381,10 +318,7 @@ class Engine:
                 resources.append(ri)
                 skill_names.extend(ri.skills_covered)
             skill_names = list(dict.fromkeys(skill_names))[:8]
-
             est_hours = int(sum(r.duration_hours for r in resources) + 6)
-            # YouTube supplements: only query real skill names (skip filler tokens
-            # like "portfolio project" / "first principles"), fall back to tracks
             yt_terms = [s for s in skill_names if s in real_skill_names][:3] \
                 or [it.rung[1] for it in items[:3]]
             yt = self.youtube_extras(yt_terms)
@@ -415,8 +349,6 @@ class Engine:
                 assessment=quiz, youtube_extras=yt,
             ))
         return milestones
-
-    # ---- youtube (secondary) ----------------------------------------
     def youtube_extras(self, skill_names: List[str], per_skill: int = 1) -> List[ResourceItem]:
         from app.services.youtube_service import get_dynamic_youtube_resources
         out: List[ResourceItem] = []
@@ -435,8 +367,6 @@ class Engine:
                     match_reason=r.get("match_reason", f"YouTube pick for {name}"),
                 ))
         return out
-
-    # ---- readiness + warnings (folded from old service files) -------
     def _readiness(self, gap, profile) -> dict:
         weekly = max(3, int(getattr(profile, "hours_per_week", 10) or 10))
         if not gap or not gap.gaps:
@@ -447,7 +377,6 @@ class Engine:
         remaining = sum(g.gap_delta for g in gap.gaps)
         hours = max(30, round(remaining * 75))
         return {"score": round(score, 1), "hours": hours, "weeks": max(2, round(hours / weekly))}
-
     def _warnings(self, profile, career: dict, gaps) -> List[str]:
         out: List[str] = list(career.get("what_not_to_do", [])[:2])
         missing = [g.skill_name for g in gaps if getattr(g, "status", "") in ("Missing", "Major Gap") and getattr(g, "is_prerequisite", False)]
@@ -463,8 +392,6 @@ class Engine:
                 seen.add(w)
                 uniq.append(w)
         return uniq[:4]
-
-    # ---- feedback loop --------------------------------------------
     def record_feedback(self, user_id: Optional[str], event_type: str,
                         course_id: Optional[str] = None, factors: Optional[dict] = None) -> dict:
         """Nudge this learner's ranker weights toward / away from the factors that
@@ -474,7 +401,6 @@ class Engine:
         if not sign or not user_id:
             return {"updated": False}
         from app.db import repository
-
         weights, affinities, row = self._learner_model(user_id)
         if factors is None and course_id:
             factors = self._stored_contributions(user_id, course_id)
@@ -485,25 +411,21 @@ class Engine:
                 weights[f] = float(np.clip(weights[f] * (1.0 + sign * lr * float(share)), 0.01, 0.6))
         tot = sum(weights.values()) or 1.0
         weights = {k: v / tot for k, v in weights.items()}
-
         if course_id:
             pos = self.catalog.df.index[self.catalog.df["course_id"] == course_id].tolist()
             if pos:
                 r = self.catalog.df.iloc[pos[0]]
                 for key in (f"track:{r['track']}", f"provider:{r['provider']}"):
                     affinities[key] = float(np.clip(affinities.get(key, 0.0) + sign * 0.15, -1.0, 1.0))
-
         update_count = ((row or {}).get("update_count", 0) if row else 0) + 1
         repository.save_learner_model(user_id, weights, affinities, update_count)
         return {"updated": True, "weights": weights, "update_count": update_count}
-
     def _stored_contributions(self, user_id, course_id) -> dict:
         try:
             from app.db import repository
             return repository.stored_contributions(user_id, course_id)
         except Exception:
             return {}
-
     def model_snapshot(self, user_id) -> dict:
         weights, affinities, row = self._learner_model(user_id)
         return {
@@ -513,6 +435,4 @@ class Engine:
             "update_count": ((row or {}).get("update_count", 0) if row else 0),
             "personalised": bool(row),
         }
-
-
 engine = Engine()

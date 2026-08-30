@@ -1,22 +1,15 @@
-"""
-Main FastAPI Application Entrypoint.
-Registers middleware, MongoDB + ML-engine startup, and API routers.
-"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from app.core.config import settings
 from app.api import (
     auth, onboarding, careers, skills, recommendations,
     paths, assessments, assistant, analytics, system
 )
-
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
     description="AI-Powered Career & Personalized Learning Path Operating System",
 )
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -24,7 +17,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 app.include_router(auth.router)
 app.include_router(onboarding.router)
 app.include_router(careers.router)
@@ -35,8 +27,6 @@ app.include_router(assessments.router)
 app.include_router(assistant.router)
 app.include_router(analytics.router)
 app.include_router(system.router)
-
-
 @app.on_event("startup")
 def _startup():
     from app.db import mongo
@@ -51,13 +41,9 @@ def _startup():
         engine.warm()
     except Exception as e:
         print(f"[startup] ML engine warm failed: {e}")
-
-
 @app.get("/")
 def root_status():
     return {"status": "online", "app": settings.APP_NAME, "version": settings.VERSION, "docs": "/docs"}
-
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

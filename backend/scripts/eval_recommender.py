@@ -1,32 +1,19 @@
-"""Regression gate for the ML engine.  Run:  python -m scripts.eval_recommender
-Exits non-zero if any check fails.
-"""
 import os
 import sys
 import time
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from app.ml.engine import engine  # noqa: E402
 from app.models.schemas import ProfileOnboardingRequest  # noqa: E402
-
 PASS, FAIL = "PASS", "FAIL"
 results = []
-
-
 def check(name, ok, detail=""):
     results.append((name, ok, detail))
     print(f"  [{PASS if ok else FAIL}] {name}" + (f" -- {detail}" if detail else ""))
-
-
-# 1. warm + timing
 t0 = time.time()
 engine.warm()
 warm_s = time.time() - t0
 check("engine warms", engine._ready and engine.catalog is not None, f"{len(engine.catalog)} courses in {warm_s:.2f}s")
 check("first-time fit under 120s", warm_s < 120.0, f"{warm_s:.2f}s (cached reloads are ~1s)")
-
-# 2. goal -> expected track/branch domination
 GOALS = {
     "machine learning": ("machine learning", "pytorch", "deep learning", "scikit", "mlops",
                          "llm", "linear algebra", "probability", "statistics", "python"),
@@ -56,10 +43,7 @@ for goal, needles in GOALS.items():
     check(f"goal '{goal}' -> >=65% on-topic", prec >= 0.65, f"{hits}/{len(res)} ({prec:.0%})")
 check("mean precision >= 0.85", (sum(precisions) / len(precisions)) >= 0.85,
       f"{sum(precisions) / len(precisions):.0%}")
-
-# 3. every generated path is topologically valid
-from app.data.taxonomy_data import CAREERS_DATABASE  # noqa: E402
-
+from app.data.taxonomy_data import CAREERS_DATABASE 
 bad = []
 for c in CAREERS_DATABASE[:8]:
     p = ProfileOnboardingRequest(experience_level="Beginner", target_career_id=c["career_id"], hours_per_week=10)
@@ -72,18 +56,12 @@ for c in CAREERS_DATABASE[:8]:
             if pos:
                 pre = str(engine.catalog.df.iloc[pos[0]]["prerequisite_course_title"]).strip().lower()
             if pre and pre in engine.catalog.title_index and pre not in seen_titles:
-                # prereq exists in catalog but hasn't appeared earlier in THIS path -> allowed only
-                # if it's not itself part of the plan; flag if it is a later step
                 later = any(pre == rr.title.strip().lower() for mm in path.milestones[path.milestones.index(m):] for rr in mm.resources)
                 if later:
                     bad.append(f"{c['career_id']}: {r.title} before {pre}")
             seen_titles.add(r.title.strip().lower())
 check("paths are prerequisite-ordered", not bad, f"{len(bad)} violations" + (f" e.g. {bad[0]}" if bad else ""))
-
-# 4. no unresolved prerequisites in the dataset
 check("0 unresolved prereqs in catalog", len(engine.graph.unresolved) == 0, f"{len(engine.graph.unresolved)} unresolved")
-
-# 5. feedback nudges the driven factor
 class _FakeQ:
     def __init__(self): self._m = None
     def query(self, *a, **k): return self
@@ -96,16 +74,13 @@ class _FakeDB:
     def query(self, *a, **k): return _FakeQ()
     def add(self, o): self.added.append(o)
     def commit(self): pass
-
 db = _FakeDB()
 before = dict(engine._learner_model(db, "pX")[0])
 engine.record_feedback(db, "pX", "downvote", factors={"quality": 0.9, "goal_fit": 0.1})
-# record_feedback persists to a new LearnerModelDB it .add()ed; check it lowered quality weight
 added = [o for o in db.added if o.__class__.__name__ == "LearnerModelDB"]
 ok = bool(added) and added[-1].weights["quality"] < before["quality"]
 check("downvote lowers the driving factor weight", ok,
       f"quality {before['quality']:.3f} -> {(added[-1].weights['quality'] if added else 0):.3f}")
-
 print()
 failed = [n for n, ok, _ in results if not ok]
 print(f"{len(results) - len(failed)}/{len(results)} checks passed")

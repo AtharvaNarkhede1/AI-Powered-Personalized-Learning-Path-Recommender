@@ -1,21 +1,7 @@
-"""
-Extract known skills from pasted free text (a resume, bio, or LinkedIn "About").
-
-Matching is against the curated SKILLS_DATABASE names:
-  1. literal, word-boundary hits on the canonical name or its sub-terms
-  2. a small acronym / alias table (ml, nlp, k8s, ...)
-  3. a bounded semantic sweep (LSA) for skills not hit literally
-
-Off-taxonomy strings the user adds themselves are still handled downstream by the
-semantic skill-gap matcher -- this just gives them a head start.
-"""
 from __future__ import annotations
-
 import re
 from typing import Dict, Iterable, List, Tuple
-
 from app.data.taxonomy_data import SKILLS_DATABASE
-
 _ALIASES = {
     "ml": "Classical Machine Learning (Scikit-Learn)",
     "scikit-learn": "Classical Machine Learning (Scikit-Learn)",
@@ -120,7 +106,6 @@ _ALIASES = {
     "tableau": "Data Visualization & Communication",
     "power bi": "Data Visualization & Communication",
 }
-
 _SPLIT = re.compile(r"[,/()]|&| and | with | of ")
 _STOP_TERMS = {"design", "systems", "system", "tools", "analysis", "modeling", "development",
                "engineering", "fundamentals", "management", "architecture", "codes", "tech",
@@ -129,26 +114,19 @@ _STOP_TERMS = {"design", "systems", "system", "tools", "analysis", "modeling", "
                "communication", "dynamics", "inference", "frameworks", "platforms", "services",
                "computing", "scientific", "structural", "materials", "energy", "storage"}
 
-
 def _terms_for(name: str) -> List[str]:
     low = name.lower()
     parts = [low] + [p.strip() for p in _SPLIT.split(low)]
     return [p for p in parts if len(p) >= 3 and p not in _STOP_TERMS]
-
-
 def _wb(term: str, text: str) -> bool:
     return re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", text) is not None
-
-
 def extract_skills_from_text(text: str, exclude: Iterable[str] = ()) -> List[Dict]:
     text = (text or "").strip()
     if len(text) < 20:
         return []
     low = " " + re.sub(r"\s+", " ", text.lower()) + " "
     exclude_low = {e.strip().lower() for e in exclude}
-
     found: Dict[str, Tuple[float, str]] = {}
-
     for s in SKILLS_DATABASE.values():
         name = s["name"]
         if name.lower() in exclude_low:
@@ -157,14 +135,11 @@ def extract_skills_from_text(text: str, exclude: Iterable[str] = ()) -> List[Dic
             if _wb(term, low):
                 found[name] = (0.95 if i == 0 else 0.85, "resume")
                 break
-
     for alias, canon in _ALIASES.items():
         if canon in found or canon.lower() in exclude_low:
             continue
         if _wb(alias, low):
             found[canon] = (0.8, "resume")
-
-    # bounded semantic sweep when the literal pass was thin
     if len(found) < 6:
         try:
             from app.ml.engine import engine
@@ -178,7 +153,6 @@ def extract_skills_from_text(text: str, exclude: Iterable[str] = ()) -> List[Dic
                     found[name] = (round(float(sim), 2), "semantic")
         except Exception:
             pass
-
     out = [{"name": n, "confidence": c, "source": src} for n, (c, src) in found.items()]
     out.sort(key=lambda x: -x["confidence"])
     return out[:20]

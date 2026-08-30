@@ -1,13 +1,4 @@
-"""
-Offline question bank for per-course quizzes, keyed by the taxonomy skill / track
-name a course belongs to. Used when no LLM is available (or its quota is spent).
-
-Each entry: a list of {question_text, options[4], correct_option_index, explanation}.
-`GENERIC` is the last-resort fallback for skills not covered here.
-"""
-
 _Q = lambda t, o, i, e: {"question_text": t, "options": o, "correct_option_index": i, "explanation": e}
-
 SKILL_QUIZ_BANK = {
     "advanced python & scientific computing": [
         _Q("What does `list(map(lambda x: x*2, filter(lambda x: x % 2, range(5))))` return?",
@@ -657,9 +648,7 @@ SKILL_QUIZ_BANK = {
             "speed is too low only", "the air is cold"], 1,
            "Beyond the critical angle of attack the flow can no longer follow the surface."),
     ],
-
 }
-
 GENERIC = [
     _Q("When a course sits later in a prerequisite-ordered roadmap, it usually means:",
        ["it is optional", "it depends on skills the earlier courses build",
