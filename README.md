@@ -24,6 +24,10 @@ Accuracy is gated by `python -m scripts.eval_recommender` (14 checks: fit time,
 per-goal precision, mean precision ≥ 0.85 — currently ~0.94, topological validity,
 0 unresolved prerequisites, feedback-loop effect).
 
+> **Full technical documentation — every algorithm, the ML model, the CSV schema,
+> the YouTube integration, all inputs/outputs and the end-to-end flow — is in
+> [`docs/SYSTEM.md`](docs/SYSTEM.md).**
+
 | Feature | Where |
 |---|---|
 | 5-step onboarding wizard | `frontend/src/components/OnboardingWizard.jsx` + `backend/app/api/onboarding.py` |
