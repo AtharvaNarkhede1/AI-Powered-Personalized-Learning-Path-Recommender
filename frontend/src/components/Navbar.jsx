@@ -29,7 +29,6 @@ export default function Navbar({ activeTab, setActiveTab, llmMode }) {
         alignItems: 'center',
         justifyContent: 'space-between'
       }}>
-        {/* Brand Logo */}
         <div
           onClick={() => setActiveTab('landing')}
           style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}
@@ -58,7 +57,6 @@ export default function Navbar({ activeTab, setActiveTab, llmMode }) {
           </div>
         </div>
 
-        {/* Navigation Tabs */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#F1F5F9', padding: '0.35rem', borderRadius: '12px' }}>
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -90,7 +88,6 @@ export default function Navbar({ activeTab, setActiveTab, llmMode }) {
           })}
         </div>
 
-        {/* AI Mode Indicator (read-only; configure keys via backend .env) */}
         <div
           title="Set GEMINI_API_KEY or OPENAI_API_KEY in backend/.env to enable a live LLM. Otherwise the grounded offline engine is used."
           style={{

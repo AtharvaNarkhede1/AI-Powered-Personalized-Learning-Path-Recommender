@@ -4,12 +4,11 @@ import { ArrowRight, Compass, Target, ShieldAlert, Award, Clock, Cpu, CheckCircl
 export default function LandingPage({ onStartOnboarding, onDemoStart }) {
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '3rem 1.5rem' }}>
-      {/* Hero Section */}
       <div style={{ textAlign: 'center', maxWidth: '850px', margin: '0 auto 4rem auto' }}>
         <div className="badge badge-indigo" style={{ marginBottom: '1.25rem', fontSize: '0.85rem', padding: '0.4rem 1rem' }}>
           <Zap size={14} /> AI-Powered Gen-Z Engineering Career OS
         </div>
-        
+
         <h1 style={{
           fontSize: '3.5rem',
           lineHeight: 1.15,
@@ -44,9 +43,7 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
         </div>
       </div>
 
-      {/* Feature Preview Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.75rem', marginBottom: '4rem' }}>
-        {/* Card 1: Multi-Branch Discovery */}
         <div className="glass-card" style={{ padding: '2rem' }}>
           <div style={{
             width: '48px',
@@ -68,7 +65,6 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           </p>
         </div>
 
-        {/* Card 2: Skill-Gap & DAG Roadmap */}
         <div className="glass-card" style={{ padding: '2rem' }}>
           <div style={{
             width: '48px',
@@ -90,7 +86,6 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           </p>
         </div>
 
-        {/* Card 3: What NOT To Do */}
         <div className="glass-card" style={{ padding: '2rem' }}>
           <div style={{
             width: '48px',
@@ -113,7 +108,6 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
         </div>
       </div>
 
-      {/* Differentiator Highlights Section */}
       <div style={{
         background: '#FFFFFF',
         borderRadius: '20px',

@@ -3,7 +3,7 @@
 ## 1. Executive Summary
 
 ### Overview
-Career PathFinder is an AI-powered personalized learning path recommender designed to help users (primarily Gen-Z engineering students and career switchers) map their interests and current skill levels into a structured, milestone-based learning roadmap. The product solves the "choice paralysis" problem in modern e-learning by shifting from a search-driven model to a recommendation-driven roadmap generation model. 
+Career PathFinder is an AI-powered personalized learning path recommender designed to help users (primarily Gen-Z engineering students and career switchers) map their interests and current skill levels into a structured, milestone-based learning roadmap. The product solves the "choice paralysis" problem in modern e-learning by shifting from a search-driven model to a recommendation-driven roadmap generation model.
 
 Currently, the project is in a **prototype/hackathon** maturity stage. It features a working end-to-end flow from onboarding to generating a learning timeline, backed by an API. However, the system relies heavily on in-memory/hardcoded data (`SKILLS_DATABASE`, `CAREERS_DATABASE`), mock authentication, and synchronous API patterns, making it unready for production traffic.
 
@@ -25,7 +25,7 @@ Currently, the project is in a **prototype/hackathon** maturity stage. It featur
 
 ### Overall Scores (out of 10)
 * **Overall:** 4.5/10 (Excellent prototype, but not production-ready)
-* **Architecture:** 6/10 
+* **Architecture:** 6/10
 * **Code Quality:** 5/10
 * **UI/UX:** 6/10 (Based on component structures, missing full styling context)
 * **Performance:** 3/10
@@ -34,9 +34,9 @@ Currently, the project is in a **prototype/hackathon** maturity stage. It featur
 * **Database Design:** 5/10
 * **API Design:** 7/10 (Clean RESTful routing, but lacks proper auth middleware)
 * **Maintainability:** 6/10
-* **Documentation:** 5/10 
+* **Documentation:** 5/10
 * **Testing:** 0/10
-* **Product Functionality:** 7/10 
+* **Product Functionality:** 7/10
 
 ---
 
@@ -44,7 +44,7 @@ Currently, the project is in a **prototype/hackathon** maturity stage. It featur
 
 ### Current Architecture Flow
 ```text
-User 
+User
   │
   ▼
 [ React Frontend (Vite) ] ── (Prop drilling state via App.jsx)
@@ -66,9 +66,9 @@ User
 ```
 
 **How it works:**
-1. **Frontend:** The Vite + React app mounts at `App.jsx`. It holds global state (`profile`, `activePath`) and initiates a demo login via `api/auth.py`. 
+1. **Frontend:** The Vite + React app mounts at `App.jsx`. It holds global state (`profile`, `activePath`) and initiates a demo login via `api/auth.py`.
 2. **Backend:** FastAPI receives HTTP requests. The routers (`paths.py`, `recommendations.py`, etc.) are synchronous.
-3. **Data Layer:** It uses SQLAlchemy synchronously to read/write from a SQLite DB (`learning_path.db`). 
+3. **Data Layer:** It uses SQLAlchemy synchronously to read/write from a SQLite DB (`learning_path.db`).
 4. **AI/Services:** When a path is generated, the `recommendation_engine.py` aggregates hardcoded local taxonomies (`SKILLS_DATABASE`) and fetches live YouTube videos dynamically, scoring them to build a milestone path.
 
 ---
@@ -77,7 +77,7 @@ User
 
 ### 3.1. Folder Structure & Separation of Concerns
 **Status:** Good, but with flaws.
-The `backend/app/` structure is fundamentally solid (`api`, `core`, `models`, `services`, `db`). However, the `models` folder is split confusingly: `app/models/schemas.py` holds Pydantic models, while `app/db/models.py` holds SQLAlchemy models. 
+The `backend/app/` structure is fundamentally solid (`api`, `core`, `models`, `services`, `db`). However, the `models` folder is split confusingly: `app/models/schemas.py` holds Pydantic models, while `app/db/models.py` holds SQLAlchemy models.
 
 ### 3.2. Technical Debt: Blocking I/O in FastAPI
 **Implementation:** `backend/app/main.py` and routers use standard `def` functions. `get_db()` yields a blocking session.
@@ -108,7 +108,7 @@ The `backend/app/` structure is fundamentally solid (`api`, `core`, `models`, `s
 ### 4.2. Routing
 **Implementation:** The app uses conditional rendering (`{activeTab === 'landing' && <LandingPage />}`) for navigation.
 **Problem:** Users cannot bookmark pages, use the browser back button, or share links.
-**Impact:** Poor UX. 
+**Impact:** Poor UX.
 **Improvement:** Implement `react-router-dom` (which is in `package.json` but seemingly underutilized based on `App.jsx` logic). Move tabs into actual URL routes (`/onboarding`, `/dashboard`, `/path/:id`).
 
 ### 4.3. UI Consistency & Error States
@@ -128,8 +128,8 @@ The `backend/app/` structure is fundamentally solid (`api`, `core`, `models`, `s
 
 ### 5.2. Service Layer Inefficiencies
 **Implementation:** `backend/app/services/recommendation_engine.py` retrieves resources by looping through all keys in `SKILLS_DATABASE`. Inside this loop, it calls `get_dynamic_youtube_resources()`.
-**Problem:** `get_dynamic_youtube_resources()` is an external HTTP call. Doing this inside a `for` loop over all skills results in the classic N+1 API problem. 
-**Impact:** Extremely slow API response times. 
+**Problem:** `get_dynamic_youtube_resources()` is an external HTTP call. Doing this inside a `for` loop over all skills results in the classic N+1 API problem.
+**Impact:** Extremely slow API response times.
 **Improvement:** Decouple dynamic fetching from candidate generation. YouTube resources should be fetched asynchronously in parallel using `asyncio.gather`, or better yet, cached in the database via a background cron job.
 
 ---
@@ -137,12 +137,12 @@ The `backend/app/` structure is fundamentally solid (`api`, `core`, `models`, `s
 ## 6. Database Analysis
 
 ### 6.1. Schema & Models
-**Current State:** 
+**Current State:**
 * `User`, `LearnerProfileDB`, `SkillProficiencyDB`, `LearningPathDB`, `MilestoneDB`.
 * Uses `String` UUIDs correctly.
 * Heavy use of `JSON` columns (`interests`, `known_skills`, `target_skills`, `resources`).
 
-**Problem:** Overuse of JSON columns in SQLite/PostgreSQL defeats the purpose of relational data. 
+**Problem:** Overuse of JSON columns in SQLite/PostgreSQL defeats the purpose of relational data.
 **Impact:** You cannot easily query "Find all users who are interested in AI" without expensive JSON parsing and full table scans.
 **Improvement:** Create association tables.
 * `user_interests` (user_id, interest_id)
@@ -158,7 +158,7 @@ This ensures the DB remains normalized and queryable.
 ## 7. Security Audit
 
 ### 7.1. Critical Security Vulnerabilities
-* **[Critical] Mock Passwords:** Passwords are saved as `f"hashed_{user_in.password}"`. 
+* **[Critical] Mock Passwords:** Passwords are saved as `f"hashed_{user_in.password}"`.
   * *Fix:* Use `passlib[bcrypt]` to hash passwords properly.
 * **[Critical] JWT Generation:** Fake tokens allow API spoofing.
   * *Fix:* Use `jose` or `PyJWT` to encode signed tokens.

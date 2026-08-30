@@ -65,7 +65,6 @@ export default function QuizModal({ skillId, userId, careerId, onClose, onQuizCo
         overflowY: 'auto',
         padding: '2rem'
       }}>
-        {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <div>
             <span className="badge badge-indigo" style={{ marginBottom: '0.25rem' }}>Diagnostic Assessment</span>
@@ -77,7 +76,6 @@ export default function QuizModal({ skillId, userId, careerId, onClose, onQuizCo
           </button>
         </div>
 
-        {/* Submission Result Screen */}
         {submissionResult ? (
           <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
             <div style={{
@@ -106,7 +104,7 @@ export default function QuizModal({ skillId, userId, careerId, onClose, onQuizCo
             </button>
           </div>
         ) : (
-          /* Question Stream */
+
           <div>
             <div style={{ display: 'grid', gap: '1.75rem', marginBottom: '2rem' }}>
               {quiz?.questions.map((q, qIdx) => (

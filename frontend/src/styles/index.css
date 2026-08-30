@@ -8,7 +8,7 @@
   --color-surface: #FFFFFF;
   --color-surface-hover: #F1F5F9;
   --color-border: #E2E8F0;
-  
+
   --color-text-main: #0F172A;
   --color-text-muted: #64748B;
   --color-text-light: #94A3B8;
@@ -16,13 +16,13 @@
   --color-primary: #4F46E5;
   --color-primary-hover: #4338CA;
   --color-primary-light: #EEF2FF;
-  
+
   --color-success: #10B981;
   --color-success-light: #ECFDF5;
-  
+
   --color-warning: #F59E0B;
   --color-warning-light: #FEF3C7;
-  
+
   --color-danger: #EF4444;
   --color-danger-light: #FEF2F2;
 
@@ -60,7 +60,6 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--color-text-main);
 }
 
-/* Glassmorphism utility */
 .glass-card {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(12px);
@@ -75,7 +74,6 @@ h1, h2, h3, h4, h5, h6 {
   border-color: rgba(79, 70, 229, 0.3);
 }
 
-/* Primary Button */
 .btn-primary {
   background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
   color: #FFFFFF;
@@ -116,7 +114,6 @@ h1, h2, h3, h4, h5, h6 {
   border-color: var(--color-text-light);
 }
 
-/* Badges */
 .badge {
   padding: 0.25rem 0.75rem;
   border-radius: 9999px;
@@ -133,7 +130,6 @@ h1, h2, h3, h4, h5, h6 {
 .badge-red { background: var(--color-danger-light); color: var(--color-danger); }
 .badge-purple { background: var(--color-purple-light); color: var(--color-purple); }
 
-/* Animated Pulse */
 @keyframes pulse-subtle {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.85; transform: scale(1.02); }
@@ -143,7 +139,6 @@ h1, h2, h3, h4, h5, h6 {
   animation: pulse-subtle 3s infinite ease-in-out;
 }
 
-/* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

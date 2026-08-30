@@ -79,10 +79,10 @@ docs/
 
 ## AI / ML components used
 
-- **Semantic matching**: local `sentence-transformers` embeddings (`services/embedding_service.py`)
-  replace literal substring matching for interest/skill/career matching, so e.g. "JS" and
+- **Semantic matching**: local TF-IDF + Truncated SVD vector space (`app/ml/semantic.py`)
+  replaces literal substring matching for interest/skill/career matching, so e.g. "JS" and
   "JavaScript" are correctly recognized as related. Falls back to token-overlap matching if the
-  optional dependency isn't installed, so the app never hard-crashes.
+  vector space is unbuilt, so the app never hard-crashes.
 - **Career matching**: weighted score across branch compatibility, semantic interest alignment,
   semantic skill overlap, and experience-vs-required-level fit -- every match ships with a
   human-readable reason and a clarification question when the top two scores are close.

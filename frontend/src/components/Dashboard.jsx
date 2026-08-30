@@ -15,7 +15,6 @@ export default function Dashboard({ metrics, onNavigate }) {
 
   return (
     <div style={{ maxWidth: '1200px', margin: '2rem auto', padding: '0 1.5rem' }}>
-      {/* Top Banner */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>Learner Overview: {user_name}</h2>
@@ -26,9 +25,7 @@ export default function Dashboard({ metrics, onNavigate }) {
         </button>
       </div>
 
-      {/* Metrics Row Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
-        {/* Metric 1 */}
         <div className="glass-card" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
             <span>JOB READINESS</span>
@@ -40,7 +37,6 @@ export default function Dashboard({ metrics, onNavigate }) {
           <p style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '0.4rem' }}>Target benchmark: 80%+</p>
         </div>
 
-        {/* Metric 2 */}
         <div className="glass-card" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
             <span>STUDY TIME LOGGED</span>
@@ -52,7 +48,6 @@ export default function Dashboard({ metrics, onNavigate }) {
           <p style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '0.4rem' }}>Est. ~{estimated_months_remaining} months left</p>
         </div>
 
-        {/* Metric 3 */}
         <div className="glass-card" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
             <span>MILESTONES COMPLETED</span>
@@ -65,9 +60,7 @@ export default function Dashboard({ metrics, onNavigate }) {
         </div>
       </div>
 
-      {/* Chart & Action Section */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '2rem' }}>
-        {/* Skill Gap Chart */}
         <div className="glass-card" style={{ padding: '2rem' }}>
           <h3 style={{ fontSize: '1.2rem', marginBottom: '1.5rem' }}>Current vs Required Skill Proficiency</h3>
           <div style={{ width: '100%', height: '300px' }}>
@@ -85,7 +78,6 @@ export default function Dashboard({ metrics, onNavigate }) {
           </div>
         </div>
 
-        {/* Next Action Box */}
         <div className="glass-card" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div className="badge badge-indigo" style={{ marginBottom: '1rem' }}>Immediate Action Engine</div>

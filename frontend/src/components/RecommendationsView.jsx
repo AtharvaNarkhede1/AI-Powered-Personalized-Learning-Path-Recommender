@@ -23,7 +23,6 @@ export default function RecommendationsView({ userId, careerId, careerTitle, onN
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }, [userId, careerId]);
 
-  // Auto-load once we have a career to anchor the ranking to.
   useEffect(() => {
     if (careerId) load('');
   }, [careerId, load]);
@@ -43,7 +42,6 @@ export default function RecommendationsView({ userId, careerId, careerTitle, onN
         {careerTitle ? <> for <strong>{careerTitle}</strong></> : null} and what you already know.
       </p>
 
-      {/* Explainer */}
       <div style={{
         display: 'flex', gap: '0.5rem', alignItems: 'flex-start',
         background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px',
@@ -76,7 +74,6 @@ export default function RecommendationsView({ userId, careerId, careerTitle, onN
         </p>
       )}
 
-      {/* States */}
       {loading && <p style={{ color: '#64748B' }}>Ranking courses…</p>}
       {error && (
         <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991B1B', borderRadius: '10px', padding: '1rem' }}>

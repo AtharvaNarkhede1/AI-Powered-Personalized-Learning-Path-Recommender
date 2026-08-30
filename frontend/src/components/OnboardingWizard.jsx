@@ -24,7 +24,7 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
   const [profile, setProfile] = useState(initialProfile || {
     user_status: "Engineering Student",
     engineering_branch: "Mechanical Engineering",
-    college_name: "HCL Institute of Technology",
+    college_name: "Institute of Technology",
     current_year: "3rd Year",
     graduation_year: 2026,
     interests: ["Robotics", "Artificial Intelligence", "Embedded Systems"],
@@ -38,13 +38,11 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
     target_timeline_months: 6
   });
 
-  // Autocomplete state
   const [interestInput, setInterestInput] = useState('');
   const [interestSuggestions, setInterestSuggestions] = useState([]);
   const [skillInput, setSkillInput] = useState('');
   const [skillSuggestions, setSkillSuggestions] = useState([]);
 
-  // Fetch predictive interest suggestions
   useEffect(() => {
     let active = true;
     async function fetchInterestSuggestions() {
@@ -59,7 +57,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
     return () => { active = false; };
   }, [interestInput]);
 
-  // Fetch predictive skill suggestions
   useEffect(() => {
     let active = true;
     async function fetchSkillSuggestions() {
@@ -110,12 +107,10 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
 
   return (
     <div style={{ maxWidth: '800px', margin: '2rem auto', padding: '0 1rem' }}>
-      {/* Progress Header */}
       <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
         <h2 style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>Personalize Your Career Journey</h2>
         <p style={{ color: '#64748B' }}>Step {step} of 5 — {getStepTitle(step)}</p>
 
-        {/* Step Progress Bar */}
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.25rem' }}>
           {[1, 2, 3, 4, 5].map((s) => (
             <div
@@ -132,7 +127,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
         </div>
       </div>
 
-      {/* Step Content Container */}
       <div className="glass-card" style={{ padding: '2.5rem' }}>
         {step === 1 && (
           <div>
@@ -199,7 +193,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
           </div>
         )}
 
-        {/* Step 3: Predictive Autocomplete & Custom Technical Interests */}
         {step === 3 && (
           <div>
             <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Areas of Technical Interest</h3>
@@ -207,7 +200,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
               Type any custom technical interest or pick from predictive suggestions across 14 engineering branches.
             </p>
 
-            {/* Selected Tags Chips */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
               {profile.interests.map((item) => (
                 <span
@@ -233,7 +225,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
               ))}
             </div>
 
-            {/* Search Input Box */}
             <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <div style={{ position: 'relative', flex: 1 }}>
@@ -252,7 +243,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
                 </button>
               </div>
 
-              {/* Autocomplete Dropdown List */}
               {interestInput.trim() && interestSuggestions.length > 0 && (
                 <div style={{
                   position: 'absolute',
@@ -291,7 +281,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
           </div>
         )}
 
-        {/* Step 4: Predictive Autocomplete & Custom Known Skills */}
         {step === 4 && (
           <div>
             <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Skills & Experience Level</h3>
@@ -299,7 +288,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
               Search or add any software tool, programming language, or hardware skill you know.
             </p>
 
-            {/* Selected Skill Chips */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
               {profile.known_skills.map((sk) => (
                 <span
@@ -325,7 +313,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
               ))}
             </div>
 
-            {/* Skill Search Input */}
             <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <div style={{ position: 'relative', flex: 1 }}>
@@ -344,7 +331,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
                 </button>
               </div>
 
-              {/* Skill Dropdown Suggestions */}
               {skillInput.trim() && skillSuggestions.length > 0 && (
                 <div style={{
                   position: 'absolute',
@@ -432,7 +418,6 @@ export default function OnboardingWizard({ initialProfile, onComplete }) {
           </div>
         )}
 
-        {/* Wizard Controls */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2.5rem', paddingTop: '1.5rem', borderTop: '1px solid #E2E8F0' }}>
           <button
             className="btn-secondary"

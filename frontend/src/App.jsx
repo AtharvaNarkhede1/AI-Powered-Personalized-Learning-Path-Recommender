@@ -17,12 +17,11 @@ export default function App() {
   const [userId, setUserId] = useState('demo_user_1');
   const [llmMode, setLlmMode] = useState('Offline Grounded Engine');
 
-  // Core State
   const [profile, setProfile] = useState({
     user_id: 'demo_user_1',
     user_status: "Engineering Student",
     engineering_branch: "Mechanical Engineering",
-    college_name: "HCL Institute of Technology",
+    college_name: "Institute of Technology",
     current_year: "3rd Year",
     graduation_year: 2026,
     interests: ["Robotics", "Artificial Intelligence", "Embedded Systems"],
@@ -41,17 +40,14 @@ export default function App() {
   const [activePath, setActivePath] = useState(null);
   const [dashboardMetrics, setDashboardMetrics] = useState(null);
 
-  // Modals
   const [quizSkillId, setQuizSkillId] = useState(null);
 
-  // Initial demo load
   useEffect(() => {
     async function initSystem() {
       try {
         const sys = await api.getSystemStatus();
         setLlmMode(sys.active_llm_mode);
 
-        // Auto-run discovery for initial profile
         const disc = await api.discoverCareers(profile);
         setDiscoveryData(disc);
 
@@ -70,7 +66,6 @@ export default function App() {
     initSystem();
   }, []);
 
-  // Handlers
   const handleStartOnboarding = () => {
     setActiveTab('onboarding');
   };
@@ -105,7 +100,7 @@ export default function App() {
   const handleSelectCareer = async (careerId) => {
     setSelectedCareerId(careerId);
     setProfile(prev => ({ ...prev, target_career_id: careerId }));
-    // Course Recommendations is the headline feature -- land there first.
+
     setActiveTab('courses');
     try {
       const pathRes = await api.generatePath(careerId, { ...profile, target_career_id: careerId });
@@ -198,7 +193,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Diagnostic Quiz Modal */}
       {quizSkillId && (
         <QuizModal
           skillId={quizSkillId}
