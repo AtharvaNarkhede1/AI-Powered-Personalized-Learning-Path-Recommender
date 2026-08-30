@@ -2,13 +2,19 @@ import React, { useState } from 'react';
 import { CheckCircle2, Clock, PlayCircle, ExternalLink, ThumbsUp, ThumbsDown, EyeOff, Award, ChevronRight, Zap, ShieldAlert, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 
-export default function LearningPathTimeline({ path, profile, userId, onCompleteMilestone, onOpenQuiz }) {
+export default function LearningPathTimeline({ path, profile, userId, onCompleteMilestone, onOpenQuiz, onNavigate }) {
   const [feedbackState, setFeedbackState] = useState({});
 
   if (!path || !path.milestones) {
     return (
-      <div style={{ textAlign: 'center', padding: '4rem 1rem' }}>
-        <p>No active roadmap generated yet. Select a career from Career Discovery first.</p>
+      <div style={{ maxWidth: '560px', margin: '4rem auto', textAlign: 'center', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '3rem 2rem' }}>
+        <h3 style={{ fontSize: '1.3rem', marginBottom: '0.5rem' }}>No learning path yet</h3>
+        <p style={{ color: '#64748B', marginBottom: '1.5rem' }}>
+          Pick a career in Career Discovery and we'll build a prerequisite-ordered course roadmap for it.
+        </p>
+        <button className="btn-primary" onClick={() => onNavigate && onNavigate('discovery')}>
+          Go to Career Discovery
+        </button>
       </div>
     );
   }
@@ -33,6 +39,11 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
             <p style={{ color: '#64748B' }}>
               Estimated Duration: <strong>{path.estimated_weeks} Weeks (~{round(path.estimated_weeks/4.2)} Months)</strong> at <strong>{path.hours_per_week} hrs/week</strong>
             </p>
+            {path.track_names && path.track_names.length > 0 && (
+              <p style={{ color: '#94A3B8', fontSize: '0.85rem', marginTop: '0.35rem' }}>
+                Tracks in this path: {path.track_names.join(' · ')}
+              </p>
+            )}
           </div>
 
           {/* Job Readiness Metric Circle */}
@@ -161,10 +172,10 @@ export default function LearningPathTimeline({ path, profile, userId, onComplete
               {/* Ordered Course Steps */}
               <div style={{ marginBottom: '1.5rem' }}>
                 <h4 style={{ fontSize: '0.95rem', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>
-                  Courses — do these in order
+                  Courses — do these in order ↓
                 </h4>
 
-                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                <div style={{ display: 'grid', gap: '0.75rem', borderLeft: '2px solid #E2E8F0', paddingLeft: '1rem', marginLeft: '0.25rem' }}>
                   {m.resources.map((res, rIdx) => {
                     const fb = feedbackState[res.id];
                     return (

@@ -66,15 +66,42 @@ class Planner:
             out[key] = self.sem.course_vectors[positions].mean(axis=0)
         return out
 
-    def _pick_tracks(self, ctx: RankingContext, goal_vec: np.ndarray, weekly: int, timeline_weeks: int) -> List[tuple]:
-        scored = sorted(
-            ((float(np.dot(cen, goal_vec)), key) for key, cen in self._track_centroids.items()),
-            key=lambda x: -x[0], reverse=False,
-        )
+    def _pick_tracks(self, ctx: RankingContext, goal_vec: np.ndarray, weekly: int,
+                     timeline_weeks: int, must_tracks: List[str] | None = None) -> List[tuple]:
+        pref = ctx.preferred_branches
+        must = [m.lower() for m in (must_tracks or [])]
+        scored = []
+        for (branch, track), cen in self._track_centroids.items():
+            s = float(np.dot(cen, goal_vec))
+            if pref and branch not in pref:
+                s -= 0.15                      # keep the path within the learner's branches
+            scored.append((s, (branch, track)))
         scored.sort(key=lambda x: -x[0])
+
         capacity = max(1, weekly) * max(2, timeline_weeks)
-        n = int(np.clip(capacity // 90, 1, 3))
-        return [key for _, key in scored[:n]]
+        n = int(np.clip(capacity // 70, 3, 6))
+
+        picked, seen = [], set()
+
+        def _add(key):
+            if key[1].lower() in seen:
+                return
+            seen.add(key[1].lower())
+            picked.append(key)
+
+        # 1) forced tracks (biggest gaps + role portfolio), best branch variant
+        by_name: Dict[str, tuple] = {}
+        for s, key in scored:
+            by_name.setdefault(key[1].lower(), (s, key))
+        for m in must:
+            if m in by_name and len(picked) < n:
+                _add(by_name[m][1])
+        # 2) fill the rest by similarity
+        for _, key in scored:
+            if len(picked) >= n:
+                break
+            _add(key)
+        return picked
 
     def _best_variant(self, ctx: RankingContext, rung: Rung, exclude: set) -> ScoredCourse | None:
         positions = self.cat.variant_index.get(rung, [])
@@ -82,8 +109,8 @@ class Planner:
         return ranked[0] if ranked else None
 
     def build_plan(self, ctx: RankingContext, goal_vec: np.ndarray, weekly: int,
-                   timeline_weeks: int, target_tier: int) -> LearningPlan:
-        tracks = self._pick_tracks(ctx, goal_vec, weekly, timeline_weeks)
+                   timeline_weeks: int, target_tier: int, must_tracks=None) -> LearningPlan:
+        tracks = self._pick_tracks(ctx, goal_vec, weekly, timeline_weeks, must_tracks)
         # a stated level waives lower rungs; prerequisite closure pulls back
         # anything genuinely required, so this never breaks ordering
         start_tier = min(target_tier, 2)
@@ -92,11 +119,14 @@ class Planner:
         waivers: List[str] = []
         used_pos: set = set()
 
+        is_portfolio = lambda t: t.lower().endswith("portfolio")
         for (branch, track) in tracks:
             for tier in range(4):
                 rung = (branch, track, tier)
                 if rung not in self.cat.variant_index:
                     continue
+                if is_portfolio(track) and tier < 1:
+                    continue                    # the role portfolio starts at Applied, not Foundations
                 if tier < start_tier:
                     ctx.satisfied_rungs.add(rung)
                     waivers.append(f"{track} - {TIER_NAME[tier]} (waived: matches your stated level)")
@@ -106,12 +136,16 @@ class Planner:
                     chosen[rung] = sc
                     used_pos.add(sc.pos)
 
-        # prerequisite closure
+        # prerequisite closure -- but never add a rung whose (track, tier) is
+        # already covered by another branch's variant we've picked
+        def _covered(r):
+            return any(r[1] == k[1] and r[2] == k[2] for k in chosen)
+
         queue = list(chosen.keys())
         while queue:
             rung = queue.pop()
             for pre in self.graph.prereq_rungs(rung):
-                if pre in chosen or pre in ctx.satisfied_rungs:
+                if pre in chosen or pre in ctx.satisfied_rungs or _covered(pre):
                     continue
                 if pre not in self.cat.variant_index:
                     continue
@@ -123,6 +157,14 @@ class Planner:
 
         if not chosen:
             return LearningPlan(tracks=[t for _, t in tracks], items=[])
+
+        # collapse any remaining (track, tier) duplicates, keeping the best score
+        best_by_key: Dict[tuple, tuple] = {}
+        for rung, sc in chosen.items():
+            key = (rung[1], rung[2])
+            if key not in best_by_key or sc.score > best_by_key[key][1].score:
+                best_by_key[key] = (rung, sc)
+        chosen = {rung: sc for rung, sc in best_by_key.values()}
 
         ordered = sorted(
             chosen.items(),

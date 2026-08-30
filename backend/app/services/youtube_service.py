@@ -1,15 +1,15 @@
 """
-YouTube Resource Discovery Service.
+YouTube Resource Discovery Service (SECONDARY "also recommended" section).
 
-If YOUTUBE_API_KEY is configured, calls the real YouTube Data API v3
-(search.list + videos.list) to get actual video titles, channel names,
-durations, and engagement (view/like counts used as a real quality signal).
-Results are cached in-process per skill to stay well within the free 10k
-quota units/day.
+If YOUTUBE_API_KEY is set, calls the YouTube Data API v3:
+  - one video search (relevance) + one playlist search
+  - videos.list for real durations + view/like counts
+  - results re-ranked by view count so the most-watched surface first
+  - a curated playlist (if found) is offered first -- for "learn X" a good
+    playlist usually beats any single video
 
-If no key is configured, falls back to a static search-results link (no
-fabricated per-video metadata -- previously this fallback invented ratings
-like 4.95 that fed directly into ranking as if they were real).
+If no key is set, returns a high-signal YouTube search link (playlist-filtered).
+Every failure path returns a fallback link -- this never raises.
 """
 import re
 import urllib.parse
@@ -20,11 +20,18 @@ from app.core.config import settings
 
 try:
     import requests
-except Exception:
+except Exception:  # pragma: no cover
     requests = None
 
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+
+# bump when the query/parse logic changes so a long-lived process drops stale cache
+_CACHE_VERSION = 2
+
+# YouTube "search filter" tokens (base64 of protobuf) -- stable, widely used
+_SP_PLAYLIST = "EgIQAw%3D%3D"       # type: playlist
+_SP_LONG_VIDEO = "EgIYAg%3D%3D"     # duration: long
 
 
 def _parse_iso8601_duration_hours(duration: str) -> float:
@@ -32,89 +39,123 @@ def _parse_iso8601_duration_hours(duration: str) -> float:
     if not match:
         return 1.0
     h, m, s = (int(g) if g else 0 for g in match.groups())
-    hours = h + m / 60 + s / 3600
-    return round(max(0.1, hours), 2)
+    return round(max(0.1, h + m / 60 + s / 3600), 2)
+
+
+def _search(params: dict) -> list:
+    resp = requests.get(YOUTUBE_SEARCH_URL, params={
+        "key": settings.YOUTUBE_API_KEY,
+        "part": "snippet",
+        "relevanceLanguage": "en",
+        "safeSearch": "moderate",
+        **params,
+    }, timeout=6)
+    resp.raise_for_status()
+    return resp.json().get("items", [])
 
 
 def _real_youtube_search(skill_name: str) -> List[Dict[str, Any]]:
     if not settings.YOUTUBE_API_KEY or requests is None:
         return []
+    query = f"{skill_name} full course"
     try:
-        search_resp = requests.get(YOUTUBE_SEARCH_URL, params={
-            "key": settings.YOUTUBE_API_KEY,
-            "q": f"{skill_name} full course tutorial",
-            "part": "snippet",
-            "type": "video",
-            "maxResults": 3,
-            "relevanceLanguage": "en",
-            "videoDuration": "long",
-        }, timeout=6)
-        search_resp.raise_for_status()
-        items = search_resp.json().get("items", [])
+        # 1. curated playlists ("learn X" playlist is often the best resource)
+        playlists = []
+        try:
+            for it in _search({"q": f"{skill_name} tutorial playlist", "type": "playlist", "maxResults": 2}):
+                pid = it.get("id", {}).get("playlistId")
+                sn = it.get("snippet", {})
+                if not pid:
+                    continue
+                playlists.append({
+                    "id": f"yt_pl_{pid}",
+                    "title": sn.get("title", f"{skill_name} playlist"),
+                    "type": "video",
+                    "provider": f"YouTube Playlist - {sn.get('channelTitle', 'Unknown')}",
+                    "url": f"https://www.youtube.com/playlist?list={pid}",
+                    "duration_hours": 6.0,
+                    "difficulty": "beginner",
+                    "skills_covered": [skill_name],
+                    "rating": 4.6,
+                    "is_free": True,
+                    "match_reason": f"Curated YouTube playlist for '{skill_name}' -- a full multi-part course.",
+                    "_views": 0,
+                })
+        except Exception:
+            pass
+
+        # 2. long-form videos, relevance-ranked
+        items = _search({"q": query, "type": "video", "maxResults": 5, "videoDuration": "long"})
         video_ids = [it["id"]["videoId"] for it in items if it.get("id", {}).get("videoId")]
-        if not video_ids:
-            return []
+        videos = []
+        if video_ids:
+            details = requests.get(YOUTUBE_VIDEOS_URL, params={
+                "key": settings.YOUTUBE_API_KEY,
+                "id": ",".join(video_ids),
+                "part": "snippet,contentDetails,statistics",
+            }, timeout=6)
+            details.raise_for_status()
+            for it in details.json().get("items", []):
+                sn, st, cd = it.get("snippet", {}), it.get("statistics", {}), it.get("contentDetails", {})
+                views = int(st.get("viewCount", 0))
+                likes = int(st.get("likeCount", 0))
+                rating = round(min(5.0, 3.6 + (likes / max(views, 1)) * 120), 2) if views else 4.0
+                videos.append({
+                    "id": f"yt_{it['id']}",
+                    "title": sn.get("title", f"{skill_name} tutorial"),
+                    "type": "video",
+                    "provider": f"YouTube - {sn.get('channelTitle', 'Unknown Channel')}",
+                    "url": f"https://www.youtube.com/watch?v={it['id']}",
+                    "duration_hours": _parse_iso8601_duration_hours(cd.get("duration", "")),
+                    "difficulty": "intermediate",
+                    "skills_covered": [skill_name],
+                    "rating": rating,
+                    "is_free": True,
+                    "match_reason": f"Most-watched '{skill_name}' course on YouTube -- {views:,} views, {likes:,} likes.",
+                    "_views": views,
+                })
+        # most-watched video first
+        videos.sort(key=lambda v: v["_views"], reverse=True)
 
-        details_resp = requests.get(YOUTUBE_VIDEOS_URL, params={
-            "key": settings.YOUTUBE_API_KEY,
-            "id": ",".join(video_ids),
-            "part": "snippet,contentDetails,statistics",
-        }, timeout=6)
-        details_resp.raise_for_status()
-        detail_items = details_resp.json().get("items", [])
-
-        results = []
-        for it in detail_items:
-            snippet = it.get("snippet", {})
-            stats = it.get("statistics", {})
-            content = it.get("contentDetails", {})
-            views = int(stats.get("viewCount", 0))
-            likes = int(stats.get("likeCount", 0))
-            # Real engagement-based rating proxy: like ratio, scaled onto our 0-5 display scale
-            rating = round(min(5.0, 3.5 + (likes / max(views, 1)) * 150), 2) if views else 4.0
-            results.append({
-                "id": f"yt_{it['id']}",
-                "title": snippet.get("title", f"{skill_name} tutorial"),
-                "type": "video",
-                "provider": f"YouTube - {snippet.get('channelTitle', 'Unknown Channel')}",
-                "url": f"https://www.youtube.com/watch?v={it['id']}",
-                "duration_hours": _parse_iso8601_duration_hours(content.get("duration", "")),
-                "difficulty": "intermediate",
-                "skills_covered": [skill_name],
-                "rating": rating,
-                "is_free": True,
-                "match_reason": f"Real YouTube result for '{skill_name}' -- {views:,} views, {likes:,} likes.",
-            })
-        return results
+        merged = (playlists[:1] + videos + playlists[1:])[:3]
+        for m in merged:
+            m.pop("_views", None)
+        return merged
     except Exception:
         return []
 
 
 def _fallback_search_link(skill_name: str, category: str) -> List[Dict[str, Any]]:
-    encoded_query = urllib.parse.quote_plus(f"{skill_name} full course tutorial masterclass")
-    search_url = f"https://www.youtube.com/results?search_query={encoded_query}"
+    course_q = urllib.parse.quote_plus(f"{skill_name} full course")
     return [{
         "id": f"yt_fallback_{urllib.parse.quote_plus(skill_name.lower())}",
-        "title": f"Search YouTube: {skill_name} Courses & Playlists",
+        "title": f"YouTube: best '{skill_name}' full-course playlists",
         "type": "video",
-        "provider": "YouTube Search (no API key configured)",
-        "url": search_url,
-        "duration_hours": 1.0,
+        "provider": "YouTube Search",
+        # sp= filters the results page to playlists (curated multi-part courses)
+        "url": f"https://www.youtube.com/results?search_query={course_q}&sp={_SP_PLAYLIST}",
+        "duration_hours": 6.0,
         "difficulty": "beginner",
         "skills_covered": [skill_name],
-        "rating": 4.0,  # neutral default -- not a claim of real quality
+        "rating": 4.0,  # neutral -- not a quality claim
         "is_free": True,
-        "match_reason": f"Set YOUTUBE_API_KEY to get real ranked results for {category} - {skill_name}; showing a search link for now.",
+        "match_reason": (
+            f"Opens YouTube's playlist results for '{skill_name} full course'. "
+            f"Set YOUTUBE_API_KEY in backend/.env for ranked, view-count-sorted picks."
+        ),
     }]
 
 
-@lru_cache(maxsize=256)
-def _cached_lookup(skill_name: str, category: str) -> tuple:
+@lru_cache(maxsize=512)
+def _cached_lookup(skill_name: str, category: str, _version: int) -> tuple:
     real = _real_youtube_search(skill_name)
-    results = real if real else _fallback_search_link(skill_name, category)
-    return tuple(results)
+    return tuple(real if real else _fallback_search_link(skill_name, category))
 
 
 def get_dynamic_youtube_resources(skill_name: str, category: str = "Engineering") -> List[Dict[str, Any]]:
-    """Returns real YouTube video resources (if YOUTUBE_API_KEY is set) or a fallback search link."""
-    return list(_cached_lookup(skill_name, category))
+    """Real YouTube playlists/videos (if YOUTUBE_API_KEY is set), else a playlist search link.
+    Returns up to 3 dicts; never raises."""
+    skill_name = (skill_name or "").strip()
+    if not skill_name:
+        return []
+    return list(_cached_lookup(skill_name, category, _CACHE_VERSION))

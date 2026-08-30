@@ -109,6 +109,7 @@ def get_active_path(db: Session, profile_id: str, career_id: str) -> Optional[Le
         milestones=milestones,
         next_action=next_action,
         what_not_to_do_warnings=row.what_not_to_do_warnings or [],
+        track_names=getattr(row, "track_names", None) or [],
     )
 
 
@@ -134,6 +135,7 @@ def save_path(db: Session, profile_id: str, path: LearningPathResponse) -> None:
     row.is_active = True
     row.next_action = path.next_action.model_dump()
     row.what_not_to_do_warnings = path.what_not_to_do_warnings
+    row.track_names = path.track_names
     db.commit()
     db.refresh(row)
 

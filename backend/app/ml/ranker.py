@@ -8,22 +8,23 @@ which weight to nudge.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 
 from app.ml.catalog import Catalog, Rung
 
-FACTORS = ["goal_fit", "skill_gain", "level_fit", "quality", "prereq_ready", "effort_fit", "format_pref"]
+FACTORS = ["goal_fit", "skill_gain", "branch_fit", "level_fit", "quality",
+           "prereq_ready", "effort_fit", "format_pref"]
 FACTOR_LABEL = {
     "goal_fit": "matches your goal", "skill_gain": "closes your skill gaps",
-    "level_fit": "fits your level", "quality": "is highly rated",
-    "prereq_ready": "you're ready for it", "effort_fit": "fits your time budget",
-    "format_pref": "matches your preferred format",
+    "branch_fit": "fits your engineering branch", "level_fit": "fits your level",
+    "quality": "is highly rated", "prereq_ready": "you're ready for it",
+    "effort_fit": "fits your time budget", "format_pref": "matches your preferred format",
 }
 DEFAULT_WEIGHTS = {
-    "goal_fit": 0.28, "skill_gain": 0.22, "level_fit": 0.14, "quality": 0.12,
-    "prereq_ready": 0.11, "effort_fit": 0.07, "format_pref": 0.06,
+    "goal_fit": 0.26, "skill_gain": 0.18, "branch_fit": 0.13, "level_fit": 0.12,
+    "quality": 0.10, "prereq_ready": 0.10, "effort_fit": 0.06, "format_pref": 0.05,
 }
 
 
@@ -35,6 +36,10 @@ class RankingContext:
     weekly_hours: int
     preferred_format: str
     satisfied_rungs: set                      # rungs the learner already has (completed + waived)
+    preferred_branches: set = field(default_factory=set)
+    home_branch: str = ""                      # the learner's own engineering branch
+    career_branches: set = field(default_factory=set)  # target career's primary + compatible
+    gap_sims: Optional[np.ndarray] = None     # cosine of every course to the gap-profile vector
     weights: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     affinities: Dict[str, float] = field(default_factory=dict)
 
@@ -50,11 +55,11 @@ class ScoredCourse:
 
 def _level_fit(tier: int, target: int) -> float:
     diff = tier - target
-    pen = 0.15 * abs(diff) if diff <= 0 else 0.30 * diff
+    pen = 0.14 * abs(diff) if diff <= 0 else 0.32 * diff
     return float(np.clip(1.0 - pen, 0.0, 1.0))
 
 
-def _skill_gain(doc_skills: List[str], skills_text: str, gap_terms: Dict[str, float]) -> float:
+def _skill_gain_tokens(doc_skills: List[str], skills_text: str, gap_terms: Dict[str, float]) -> float:
     if not gap_terms:
         return 0.4
     hit = 0.0
@@ -78,8 +83,7 @@ class Ranker:
         if not preds:
             return 1.0
         met = sum(1 for p in preds if p in satisfied)
-        frac = met / len(preds)
-        return float(0.25 + 0.75 * frac)
+        return float(0.25 + 0.75 * (met / len(preds)))
 
     def rank(self, ctx: RankingContext, positions: List[int], limit: int = 12,
              exclude: set | None = None, one_per_rung: bool = True) -> List[ScoredCourse]:
@@ -88,16 +92,39 @@ class Ranker:
         if not positions:
             return []
         weights = {f: ctx.weights.get(f, DEFAULT_WEIGHTS[f]) for f in FACTORS}
+        # pure goal search (no branch/career context): branch_fit carries no
+        # signal, so hand its weight to goal_fit instead of diluting the score
+        if not ctx.home_branch and not ctx.career_branches:
+            weights["goal_fit"] += weights["branch_fit"]
+            weights["branch_fit"] = 0.0
         wsum = sum(weights.values()) or 1.0
 
         pool_goal_max = max((ctx.goal_sims[p] for p in positions), default=1.0) or 1.0
+        pool_gap_max = 1.0
+        if ctx.gap_sims is not None:
+            pool_gap_max = max((ctx.gap_sims[p] for p in positions), default=1.0) or 1.0
+
         scored: List[ScoredCourse] = []
         for p in positions:
             row = self.cat.df.iloc[p]
             rung: Rung = (row["branch"], row["track"], int(self.cat.tiers[p]))
+            if ctx.gap_sims is not None:
+                skill_gain = float(ctx.gap_sims[p] / pool_gap_max)
+            else:
+                skill_gain = _skill_gain_tokens(self.cat.skill_lists[p], str(row["skills_taught"]).lower(), ctx.gap_terms)
+            b = row["branch"]
+            if ctx.home_branch and b == ctx.home_branch:
+                branch_fit = 1.0
+            elif b in ctx.career_branches:
+                branch_fit = 0.82
+            elif not ctx.preferred_branches or b in ctx.preferred_branches:
+                branch_fit = 0.62
+            else:
+                branch_fit = 0.35
             fv = {
                 "goal_fit": float(ctx.goal_sims[p] / pool_goal_max),
-                "skill_gain": _skill_gain(self.cat.skill_lists[p], str(row["skills_taught"]).lower(), ctx.gap_terms),
+                "skill_gain": skill_gain,
+                "branch_fit": branch_fit,
                 "level_fit": _level_fit(int(self.cat.tiers[p]), ctx.target_tier),
                 "quality": float(self.cat.quality[p]),
                 "prereq_ready": self._prereq_ready(rung, ctx.satisfied_rungs),

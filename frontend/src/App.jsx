@@ -8,7 +8,6 @@ import LearningPathTimeline from './components/LearningPathTimeline';
 import Dashboard from './components/Dashboard';
 import ChatInterface from './components/ChatInterface';
 import QuizModal from './components/QuizModal';
-import SettingsModal from './components/SettingsModal';
 
 import { api } from './api/client';
 import './styles/index.css';
@@ -41,10 +40,9 @@ export default function App() {
   const [selectedCareerId, setSelectedCareerId] = useState(null);
   const [activePath, setActivePath] = useState(null);
   const [dashboardMetrics, setDashboardMetrics] = useState(null);
-  
+
   // Modals
   const [quizSkillId, setQuizSkillId] = useState(null);
-  const [showSettings, setShowSettings] = useState(false);
 
   // Initial demo load
   useEffect(() => {
@@ -52,7 +50,7 @@ export default function App() {
       try {
         const sys = await api.getSystemStatus();
         setLlmMode(sys.active_llm_mode);
-        
+
         // Auto-run discovery for initial profile
         const disc = await api.discoverCareers(profile);
         setDiscoveryData(disc);
@@ -61,7 +59,7 @@ export default function App() {
           const topId = disc.top_matches[0].career_id;
           const pathRes = await api.generatePath(topId, profile);
           setActivePath(pathRes);
-          
+
           const metrics = await api.getDashboardMetrics(profile, topId);
           setDashboardMetrics(metrics);
         }
@@ -105,16 +103,16 @@ export default function App() {
   };
 
   const handleSelectCareer = async (careerId) => {
+    setSelectedCareerId(careerId);
+    setProfile(prev => ({ ...prev, target_career_id: careerId }));
+    // Course Recommendations is the headline feature -- land there first.
+    setActiveTab('courses');
     try {
-      setSelectedCareerId(careerId);
-      setProfile(prev => ({ ...prev, target_career_id: careerId }));
       const pathRes = await api.generatePath(careerId, { ...profile, target_career_id: careerId });
       setActivePath(pathRes);
-      
-      const metrics = await api.getDashboardMetrics(profile, careerId);
-      setDashboardMetrics(metrics);
 
-      setActiveTab('roadmap');
+      const metrics = await api.getDashboardMetrics({ ...profile, target_career_id: careerId }, careerId);
+      setDashboardMetrics(metrics);
     } catch (err) {
       console.error(err);
     }
@@ -124,7 +122,7 @@ export default function App() {
     try {
       const updatedPath = await api.completeMilestone(careerId, milestoneId, profile);
       setActivePath(updatedPath);
-      
+
       const metrics = await api.getDashboardMetrics(profile, careerId);
       setDashboardMetrics(metrics);
     } catch (err) {
@@ -132,12 +130,13 @@ export default function App() {
     }
   };
 
+  const activeCareerId = selectedCareerId || activePath?.career_id || null;
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#F8FAFC' }}>
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onOpenSettings={() => setShowSettings(true)}
         llmMode={llmMode}
       />
 
@@ -167,7 +166,9 @@ export default function App() {
         {activeTab === 'courses' && (
           <RecommendationsView
             userId={userId}
-            careerId={selectedCareerId || activePath?.career_id || null}
+            careerId={activeCareerId}
+            careerTitle={activePath?.career_title}
+            onNavigate={setActiveTab}
           />
         )}
 
@@ -178,6 +179,7 @@ export default function App() {
             userId={userId}
             onCompleteMilestone={handleCompleteMilestone}
             onOpenQuiz={(skillId) => setQuizSkillId(skillId)}
+            onNavigate={setActiveTab}
           />
         )}
 
@@ -208,14 +210,6 @@ export default function App() {
               handleSelectCareer(activePath.career_id);
             }
           }}
-        />
-      )}
-
-      {/* Settings Modal */}
-      {showSettings && (
-        <SettingsModal
-          onClose={() => setShowSettings(false)}
-          onKeysUpdated={(mode) => setLlmMode(mode)}
         />
       )}
     </div>

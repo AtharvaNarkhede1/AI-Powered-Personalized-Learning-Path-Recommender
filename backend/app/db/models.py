@@ -93,6 +93,7 @@ class LearningPathDB(Base):
     job_readiness_score = Column(Float, default=35.0)
     next_action = Column(JSON, nullable=True)
     what_not_to_do_warnings = Column(JSON, default=list)
+    track_names = Column(JSON, default=list)
 
     profile = relationship("LearnerProfileDB", back_populates="learning_paths")
     milestones = relationship("MilestoneDB", back_populates="path", cascade="all, delete-orphan", order_by="MilestoneDB.sequence_order")

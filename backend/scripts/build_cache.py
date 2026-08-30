@@ -10,4 +10,4 @@ from app.ml.engine import engine  # noqa: E402
 
 if __name__ == "__main__":
     engine.warm()
-    print("cache ready:", os.path.join(engine.catalog and "", ""))
+    print(f"cache ready: {len(engine.catalog)} courses, {len(engine.graph.g)} rungs")

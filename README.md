@@ -8,11 +8,21 @@ resources, diagnostic quizzes, and an explainable AI chat assistant.
 ## What's built
 
 The **core** of the app is a local, dataset-driven engine (`backend/app/ml/`): a
-synthetic course catalog (`backend/app/data/courses.csv`, ~2.4k rows) is loaded
-once at startup and used to fit a **TF-IDF → Truncated SVD (LSA)** semantic space,
-build a **NetworkX prerequisite DAG**, and serve (a) ranked course recommendations
-and (b) a prerequisite-ordered, phased learning path. YouTube is a **secondary**
-"also recommended" section per milestone. No LLM/API key is required.
+synthetic course catalog (`backend/app/data/courses.csv`, **~18k rows** across all
+14 engineering branches and every skill in the taxonomy) is loaded once at startup
+and used to fit a **hybrid TF-IDF + Truncated SVD (LSA)** retrieval space, build a
+**NetworkX prerequisite DAG**, and serve (a) ranked course recommendations and
+(b) a prerequisite-ordered, phased learning path. Ranking uses 8 explainable
+factors (goal fit, skill-gap coverage, branch fit, level fit, rating, prerequisite
+readiness, time fit, format) with per-learner weights that adapt from feedback;
+short queries get pseudo-relevance-feedback expansion. YouTube is a **secondary**
+"also recommended" section per milestone. No LLM/API key is required — configure
+`GEMINI_API_KEY` / `OPENAI_API_KEY` in `backend/.env` only to upgrade the (already
+data-grounded) chat assistant to a live model.
+
+Accuracy is gated by `python -m scripts.eval_recommender` (14 checks: fit time,
+per-goal precision, mean precision ≥ 0.85 — currently ~0.94, topological validity,
+0 unresolved prerequisites, feedback-loop effect).
 
 | Feature | Where |
 |---|---|

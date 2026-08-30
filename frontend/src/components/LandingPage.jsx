@@ -19,9 +19,9 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent'
         }}>
-          Your career shouldn't be a guess.
+          A ranked course list and a path to follow them in.
         </h1>
-        
+
         <p style={{
           fontSize: '1.25rem',
           color: '#475569',
@@ -29,7 +29,9 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           marginBottom: '2.5rem',
           fontWeight: 400
         }}>
-          Discover engineering careers that fit your true strengths, uncover exact skill gaps, avoid common career traps, and follow an explainable, prerequisite-aware roadmap.
+          Tell us your engineering background and goal. We match you to a career, then rank real
+          courses for it and order them into a prerequisite-aware learning path — do this course
+          first because the last one builds on it. Free YouTube playlists are added as supplements.
         </p>
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
@@ -59,9 +61,10 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           }}>
             <Compass size={26} />
           </div>
-          <h3 style={{ fontSize: '1.3rem', marginBottom: '0.75rem' }}>14 Branch Career Discovery</h3>
+          <h3 style={{ fontSize: '1.3rem', marginBottom: '0.75rem' }}>Ranked Course Recommendations</h3>
           <p style={{ color: '#64748B', lineHeight: 1.6, fontSize: '0.95rem' }}>
-            Covers Computer Science, Robotics, ECE, Electrical, Mechanical, Civil, Chemical, Aerospace, and more. Calculates profile match % and cross-branch transition feasibility.
+            Every course is scored against your goal, the skill gaps it closes, your level, rating,
+            prerequisite readiness and time budget — and shows exactly why it was picked.
           </p>
         </div>
 
@@ -80,9 +83,10 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           }}>
             <Target size={26} />
           </div>
-          <h3 style={{ fontSize: '1.3rem', marginBottom: '0.75rem' }}>Prerequisite DAG Roadmap</h3>
+          <h3 style={{ fontSize: '1.3rem', marginBottom: '0.75rem' }}>Prerequisite-Ordered Path</h3>
           <p style={{ color: '#64748B', lineHeight: 1.6, fontSize: '0.95rem' }}>
-            Uses Directed Acyclic Graph (DAG) topological sorting to enforce prerequisite ordering before advanced topics, paired with realistic weekly calendar pacing.
+            The recommended courses are sequenced with a prerequisite graph (topological sort) into
+            phases — so you always take the foundation before the thing that needs it.
           </p>
         </div>
 
@@ -101,9 +105,10 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           }}>
             <ShieldAlert size={26} />
           </div>
-          <h3 style={{ fontSize: '1.3rem', marginBottom: '0.75rem' }}>Personalized "What NOT to Do"</h3>
+          <h3 style={{ fontSize: '1.3rem', marginBottom: '0.75rem' }}>YouTube Supplements + Guidance</h3>
           <p style={{ color: '#64748B', lineHeight: 1.6, fontSize: '0.95rem' }}>
-            Protects engineering learners from certificate hoarding without projects, skipping math/logic prerequisites, or falling into hype-driven career traps.
+            Each milestone adds free YouTube playlists as optional supplements, plus a personalized
+            "what NOT to do" list so you skip the common traps for your field.
           </p>
         </div>
       </div>
@@ -140,8 +145,8 @@ export default function LandingPage({ onStartOnboarding, onDemoStart }) {
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
             <CheckCircle2 color="#10B981" size={22} style={{ flexShrink: 0, marginTop: '2px' }} />
             <div>
-              <h4 style={{ fontSize: '1.05rem', marginBottom: '0.35rem' }}>Dual-Mode AI & RAG Fallback</h4>
-              <p style={{ color: '#64748B', fontSize: '0.9rem' }}>Operates with Gemini or OpenAI API keys, or runs 100% offline out-of-the-box using grounded semantic heuristics.</p>
+              <h4 style={{ fontSize: '1.05rem', marginBottom: '0.35rem' }}>Runs Fully Offline</h4>
+              <p style={{ color: '#64748B', fontSize: '0.9rem' }}>Course ranking and path planning are local (TF-IDF + SVD, no API key). Add a Gemini/OpenAI key in the backend .env only if you want a live chat assistant.</p>
             </div>
           </div>
         </div>

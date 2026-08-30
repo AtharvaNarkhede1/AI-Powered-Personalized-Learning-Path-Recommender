@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, ThumbsUp, ThumbsDown, Search, Star, Clock } from 'lucide-react';
+import { ExternalLink, ThumbsUp, ThumbsDown, Search, Star, Clock, Compass, Info } from 'lucide-react';
 import { api } from '../api/client';
 
 const FACTOR_LABEL = {
@@ -7,54 +7,101 @@ const FACTOR_LABEL = {
   quality: 'highly rated', prereq_ready: "you're ready", effort_fit: 'fits your time', format_pref: 'preferred format'
 };
 
-export default function RecommendationsView({ userId, careerId }) {
+export default function RecommendationsView({ userId, careerId, careerTitle, onNavigate }) {
   const [goalText, setGoalText] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [feedback, setFeedback] = useState({});
+  const [hasSearched, setHasSearched] = useState(false);
 
   const load = useCallback(async (goal) => {
-    setLoading(true); setError(null);
+    setLoading(true); setError(null); setHasSearched(true);
     try {
       const res = await api.getCourseRecommendations({ userId, goalText: goal || null, careerId, limit: 12 });
       setData(res);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }, [userId, careerId]);
 
-  useEffect(() => { load(''); }, [load]);
+  // Auto-load once we have a career to anchor the ranking to.
+  useEffect(() => {
+    if (careerId) load('');
+  }, [careerId, load]);
 
   const handleFeedback = async (r, type) => {
     setFeedback({ ...feedback, [r.id]: type });
     try { await api.submitFeedback(r.course_id || r.id, type, userId); } catch (e) { console.error(e); }
   };
 
+  const results = data?.results || [];
+
   return (
     <div style={{ maxWidth: '1000px', margin: '2rem auto', padding: '0 1.5rem' }}>
       <h2 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>Course Recommendations</h2>
-      <p style={{ color: '#64748B', marginBottom: '1.5rem' }}>
-        Ranked from the course catalog against your goal and what you already know.
-        {data?.goal && <> Current goal: <strong>{data.goal}</strong></>}
+      <p style={{ color: '#64748B', marginBottom: '1rem' }}>
+        Courses ranked from the catalog against your goal
+        {careerTitle ? <> for <strong>{careerTitle}</strong></> : null} and what you already know.
       </p>
+
+      {/* Explainer */}
+      <div style={{
+        display: 'flex', gap: '0.5rem', alignItems: 'flex-start',
+        background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px',
+        padding: '0.75rem 1rem', marginBottom: '1.5rem', fontSize: '0.82rem', color: '#475569'
+      }}>
+        <Info size={15} style={{ flexShrink: 0, marginTop: '2px' }} color="#4F46E5" />
+        <span>
+          Each course shows the ranking <strong>drivers</strong> (goal fit, skill gaps closed, level fit,
+          rating, prerequisite readiness, time fit, format) as a % of why it was picked.
+          Thumbs&nbsp;up/down tunes future rankings to you.
+        </span>
+      </div>
 
       <form
         onSubmit={(e) => { e.preventDefault(); load(goalText); }}
-        style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem' }}
+        style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}
       >
         <input
           value={goalText}
           onChange={(e) => setGoalText(e.target.value)}
-          placeholder="Optional: type a goal, e.g. 'learn computer vision for robotics'"
-          style={{ flex: 1, padding: '0.75rem 1rem', border: '1px solid #CBD5E1', borderRadius: '10px', fontSize: '0.95rem' }}
+          placeholder="Type a goal, e.g. 'learn computer vision for robotics'"
+          style={{ flex: 1, minWidth: '260px', padding: '0.75rem 1rem', border: '1px solid #CBD5E1', borderRadius: '10px', fontSize: '0.95rem' }}
         />
         <button className="btn-primary" type="submit"><Search size={16} /> Get courses</button>
       </form>
 
-      {loading && <p>Ranking courses…</p>}
-      {error && <p style={{ color: '#EF4444' }}>Error: {error}</p>}
+      {data?.goal && (
+        <p style={{ fontSize: '0.82rem', color: '#94A3B8', marginBottom: '1.5rem' }}>
+          Ranking against: <em>{data.goal}</em>
+        </p>
+      )}
+
+      {/* States */}
+      {loading && <p style={{ color: '#64748B' }}>Ranking courses…</p>}
+      {error && (
+        <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991B1B', borderRadius: '10px', padding: '1rem' }}>
+          Couldn't load recommendations: {error}
+        </div>
+      )}
+
+      {!loading && !error && !careerId && !hasSearched && (
+        <div style={{ textAlign: 'center', padding: '3rem 1rem', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '16px' }}>
+          <Compass size={30} color="#4F46E5" style={{ marginBottom: '0.75rem' }} />
+          <p style={{ color: '#475569', marginBottom: '1rem' }}>
+            Pick a career first so we can rank courses for it — or just type a goal above.
+          </p>
+          <button className="btn-primary" onClick={() => onNavigate && onNavigate('discovery')}>
+            Go to Career Discovery
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && hasSearched && results.length === 0 && (
+        <p style={{ color: '#64748B' }}>No matching courses found — try a broader goal.</p>
+      )}
 
       <div style={{ display: 'grid', gap: '1rem' }}>
-        {data?.results?.map((r, idx) => {
+        {results.map((r, idx) => {
           const fb = feedback[r.id];
           const drivers = Object.entries(r.factor_contributions || {})
             .sort((a, b) => b[1] - a[1]).slice(0, 3).filter(([, v]) => v >= 0.08);
@@ -71,12 +118,13 @@ export default function RecommendationsView({ userId, careerId }) {
                      style={{ fontWeight: 700, color: '#0F172A', textDecoration: 'none', fontSize: '1.05rem', display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
                     {r.title} <ExternalLink size={14} color="#4F46E5" />
                   </a>
-                  <div style={{ display: 'flex', gap: '1rem', color: '#64748B', fontSize: '0.82rem', margin: '0.4rem 0' }}>
+                  <div style={{ display: 'flex', gap: '1rem', color: '#64748B', fontSize: '0.82rem', margin: '0.4rem 0', flexWrap: 'wrap' }}>
                     <span>{r.provider}</span>
                     <span><Clock size={12} style={{ verticalAlign: -2 }} /> {r.duration_hours} hrs</span>
-                    <span><Star size={12} style={{ verticalAlign: -2 }} /> {r.rating} ({r.num_reviews.toLocaleString()})</span>
+                    <span><Star size={12} style={{ verticalAlign: -2 }} /> {r.rating} ({(r.num_reviews || 0).toLocaleString()})</span>
+                    {r.is_free ? <span style={{ color: '#059669', fontWeight: 600 }}>Free</span> : null}
                   </div>
-                  <p style={{ fontSize: '0.88rem', color: '#475569', margin: '0.25rem 0' }}>{r.match_reason}</p>
+                  {r.match_reason && <p style={{ fontSize: '0.88rem', color: '#475569', margin: '0.25rem 0' }}>{r.match_reason}</p>}
                   {drivers.length > 0 && (
                     <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                       {drivers.map(([f, v]) => (
@@ -107,7 +155,14 @@ export default function RecommendationsView({ userId, careerId }) {
           );
         })}
       </div>
-      {data && !loading && data.results.length === 0 && <p>No matching courses found.</p>}
+
+      {results.length > 0 && onNavigate && (
+        <div style={{ textAlign: 'center', marginTop: '2rem' }}>
+          <button className="btn-secondary" onClick={() => onNavigate('roadmap')}>
+            See these as an ordered learning path →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -60,6 +60,23 @@ class Engine:
         self._require()
         return self.semantic.best_text_similarity(query, candidates)
 
+    def _query_sims(self, text: str) -> np.ndarray:
+        """Hybrid similarity of every course to `text`, with pseudo-relevance
+        feedback for short queries: the skill tokens of the initial top matches
+        are folded back into the query so 'cybersecurity' also pulls in
+        networking/crypto courses, not just the one lexical hit."""
+        sims = self.semantic.hybrid_to_courses(text)
+        if len((text or "").split()) > 7:
+            return sims
+        top = np.argsort(-sims)[:10]
+        toks: List[str] = []
+        for p in top:
+            toks.extend(self.catalog.skill_lists[p][:3])
+            toks.append(str(self.catalog.df.iloc[p]["track"]).lower())
+        expanded = text + " " + " ".join(dict.fromkeys(toks))
+        sims2 = self.semantic.hybrid_to_courses(expanded)
+        return np.clip(0.55 * sims + 0.45 * sims2, 0.0, 1.0)
+
     # ---- goal + context -------------------------------------------------
     def interpret_profile(self, profile, career_id: Optional[str] = None,
                           gap_names: Optional[List[str]] = None) -> str:
@@ -69,13 +86,15 @@ class Engine:
         if cid:
             c = next((c for c in CAREERS_DATABASE if c["career_id"] == cid), None)
             if c:
-                bits.append(c["title"])
+                bits.append(f"{c['title']}. {c['category']}. {c['description']}")
+                bits.append(" ".join(c["key_responsibilities"][:3]))
+                bits.append(" ".join(s["name"] for s in c["required_skills"]))
         if getattr(profile, "interests", None):
             bits.append("interests: " + ", ".join(profile.interests))
         if getattr(profile, "engineering_branch", None):
             bits.append("branch: " + profile.engineering_branch)
         if gap_names:
-            bits.append("focus skills: " + ", ".join(gap_names[:6]))
+            bits.append("focus skills: " + ", ".join(gap_names[:8]))
         return ". ".join(bits) or "engineering career skills"
 
     def _learner_model(self, db, profile_id: Optional[str]):
@@ -119,14 +138,32 @@ class Engine:
 
         goal_text = self.interpret_profile(profile, career_id, gap_names)
         goal_vec = self.semantic.encode(goal_text)
-        goal_sims = self.semantic.cosine_to_courses(goal_vec)
+        goal_sims = self._query_sims(goal_text)
+
+        gap_sims = None
+        if gap_names:
+            gap_sims = self._query_sims(" . ".join(gap_names))
 
         weights, affinities, _ = self._learner_model(db, profile_id)
         exp = (getattr(profile, "experience_level", "intermediate") or "intermediate").lower()
         target_tier = EXP_TIER.get(next((k for k in EXP_TIER if k in exp), "intermediate"), 1)
 
+        home_branch = getattr(profile, "engineering_branch", "") or ""
+        career_branches: set = set()
+        if career_id:
+            from app.data.taxonomy_data import CAREERS_DATABASE
+            c = next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), None)
+            if c:
+                career_branches.add(c["branch_primary"])
+                career_branches.update(c.get("branches_compatible", []))
+        preferred = set(career_branches)
+        if home_branch:
+            preferred.add(home_branch)
+
         ctx = RankingContext(
-            goal_sims=goal_sims, gap_terms=gap_terms, target_tier=target_tier,
+            goal_sims=goal_sims, gap_terms=gap_terms, gap_sims=gap_sims,
+            target_tier=target_tier, preferred_branches=preferred,
+            home_branch=home_branch, career_branches=career_branches,
             weekly_hours=max(3, int(getattr(profile, "hours_per_week", 10) or 10)),
             preferred_format=(getattr(profile, "preferred_format", "") or "").lower(),
             satisfied_rungs=set(), weights=weights, affinities=affinities,
@@ -134,7 +171,8 @@ class Engine:
         return ctx, goal_vec, goal_text, gap, gap_names
 
     # ---- recommendations ------------------------------------------------
-    def _candidate_pool(self, ctx: RankingContext, career_id: Optional[str]) -> List[int]:
+    def _candidate_pool(self, ctx: RankingContext, career_id: Optional[str],
+                        goal_vec: Optional[np.ndarray] = None) -> List[int]:
         cat = self.catalog
         pool: set = set()
         if career_id:
@@ -142,9 +180,36 @@ class Engine:
             c = next((c for c in CAREERS_DATABASE if c["career_id"] == career_id), None)
             if c:
                 pool |= set(cat.career_index.get(c["title"].lower(), []))
-        top = np.argsort(-ctx.goal_sims)[:500]
-        pool |= set(int(p) for p in top)
+        pool |= {int(p) for p in np.argsort(-ctx.goal_sims)[:2500]}
+        # seed every position of the ~50 tracks whose centroid is closest to the
+        # goal, so the pool covers enough *distinct* skill areas to fill the list
+        if goal_vec is not None and self.planner is not None:
+            tsim = sorted(
+                ((float(np.dot(cen, goal_vec)), key) for key, cen in self.planner._track_centroids.items()),
+                key=lambda x: -x[0],
+            )[:18]
+            for _, key in tsim:
+                pool |= set(cat.track_index.get(key, []))
+        pool = [p for p in pool if not str(cat.df.iloc[p]["track"]).endswith("Portfolio")]
         return sorted(pool)
+
+    def _mmr(self, ranked, limit: int, lam: float = 0.72):
+        """Greedy MMR: keep the ranked order but skip a course too similar (in the
+        LSA space) to one already picked, so the list isn't 10 near-identical rows."""
+        picked, picked_vecs = [], []
+        for sc in ranked:
+            v = self.semantic.course_vectors[sc.pos]
+            if picked_vecs:
+                max_sim = max(float(v @ pv) for pv in picked_vecs)
+            else:
+                max_sim = 0.0
+            if max_sim > 0.93:          # essentially the same course
+                continue
+            picked.append(sc)
+            picked_vecs.append(v)
+            if len(picked) >= limit:
+                break
+        return picked
 
     def recommend(self, db, profile, goal_text: Optional[str] = None,
                   career_id: Optional[str] = None, limit: int = 12,
@@ -152,17 +217,40 @@ class Engine:
         self._require()
         ctx, goal_vec, derived_goal, gap, _ = self._context(profile, career_id, db, profile_id)
         if goal_text:
-            gv = self.semantic.encode(goal_text)
-            ctx.goal_sims = self.semantic.cosine_to_courses(gv)
+            goal_vec = self.semantic.encode(goal_text)
+            ctx.goal_sims = self._query_sims(goal_text)
             derived_goal = goal_text
 
         exclude: set = set()
         if exclude_planned and db is not None and profile_id:
             exclude = self._planned_positions(db, profile_id)
 
-        pool = [p for p in self._candidate_pool(ctx, career_id) if p not in exclude]
-        ranked = self.ranker.rank(ctx, pool, limit=limit, one_per_rung=True)
-        results = [self._resource_item(sc.pos, sc) for sc in ranked]
+        pool = [p for p in self._candidate_pool(ctx, career_id, goal_vec) if p not in exclude]
+        ranked = self.ranker.rank(ctx, pool, limit=limit * 8, one_per_rung=True)
+
+        # at most one course per track (its most relevant tier) so the list is
+        # <limit> distinct skill areas, then MMR to drop near-identical vectors
+        seen_track, dedup = set(), []
+        for sc in ranked:
+            tr = str(self.catalog.df.iloc[sc.pos]["track"]).lower()
+            if tr in seen_track:
+                continue
+            seen_track.add(tr)
+            dedup.append(sc)
+        final = self._mmr(dedup, limit)
+
+        # quality gate: keep the first `keep_min` (already score-ranked) plus any
+        # later ones still genuinely close to the goal -- better a short strong
+        # list than one padded with weak matches
+        if final:
+            keep_min = min(2, len(final))
+            best_sim = max(ctx.goal_sims[sc.pos] for sc in final)
+            best_score = final[0].score
+            final = [sc for i, sc in enumerate(final)
+                     if i < keep_min
+                     or (ctx.goal_sims[sc.pos] >= 0.30 * best_sim and sc.score >= 0.52 * best_score)]
+
+        results = [self._resource_item(sc.pos, sc) for sc in final]
         return {"goal": derived_goal, "count": len(results), "results": [r.model_dump() for r in results]}
 
     def _planned_positions(self, db, profile_id) -> set:
@@ -212,7 +300,20 @@ class Engine:
 
         weekly = ctx.weekly_hours
         timeline_weeks = max(4, int(getattr(profile, "target_timeline_months", 6) or 6) * 4)
-        plan: LearningPlan = self.planner.build_plan(ctx, goal_vec, weekly, timeline_weeks, ctx.target_tier)
+
+        # guarantee the learner's biggest skill gaps get a dedicated track, then
+        # the role-portfolio track, then similarity fills the rest
+        must_tracks: List[str] = []
+        for name in gap_names[:5]:
+            key = name.lower()
+            for tname in self.catalog.tracks_vocab:
+                if tname == key:
+                    must_tracks.append(tname)
+                    break
+        must_tracks.append(f"{career['title'].lower()} portfolio")
+
+        plan: LearningPlan = self.planner.build_plan(
+            ctx, goal_vec, weekly, timeline_weeks, ctx.target_tier, must_tracks=must_tracks)
 
         milestones = self._plan_to_milestones(plan, weekly)
         readiness = self._readiness(gap, profile)
@@ -236,16 +337,30 @@ class Engine:
         )
 
     def _plan_to_milestones(self, plan: LearningPlan, weekly: int) -> List[Milestone]:
-        from app.data.taxonomy_data import QUIZZES_DATABASE
+        from app.data.taxonomy_data import QUIZZES_DATABASE, SKILLS_DATABASE
         from app.ml.planner import PHASE_DESC, PHASE_TITLES
+
+        real_skill_names = {s["name"].lower() for s in SKILLS_DATABASE.values()}
 
         by_phase: Dict[int, list] = {}
         for it in plan.items:
             by_phase.setdefault(it.phase, []).append(it)
 
+        # split a big phase into balanced "(Part N)" milestones (no tiny tails)
+        import math
+        groups: List[tuple] = []          # (phase, part_index, items)
+        for phase in sorted(by_phase):
+            ph_items = by_phase[phase]
+            if len(ph_items) <= 7:
+                groups.append((phase, 0, ph_items))
+                continue
+            k = math.ceil(len(ph_items) / 6)
+            size = math.ceil(len(ph_items) / k)
+            for i in range(0, len(ph_items), size):
+                groups.append((phase, i // size + 1, ph_items[i:i + size]))
+
         milestones: List[Milestone] = []
-        for seq, phase in enumerate(sorted(by_phase), start=1):
-            items = by_phase[phase]
+        for seq, (phase, part, items) in enumerate(groups, start=1):
             resources: List[ResourceItem] = []
             skill_names: List[str] = []
             for it in items:
@@ -259,7 +374,11 @@ class Engine:
             skill_names = list(dict.fromkeys(skill_names))[:8]
 
             est_hours = int(sum(r.duration_hours for r in resources) + 6)
-            yt = self.youtube_extras(skill_names[:3])
+            # YouTube supplements: only query real skill names (skip filler tokens
+            # like "portfolio project" / "first principles"), fall back to tracks
+            yt_terms = [s for s in skill_names if s in real_skill_names][:3] \
+                or [it.rung[1] for it in items[:3]]
+            yt = self.youtube_extras(yt_terms)
             quiz = None
             for it in items:
                 row = self.catalog.df.iloc[it.pos]
@@ -269,9 +388,12 @@ class Engine:
                         break
                 if quiz:
                     break
+            ttl = PHASE_TITLES.get(phase, f"Phase {seq}")
+            if part:
+                ttl = f"{ttl} (Part {part})"
             milestones.append(Milestone(
                 id=f"ms_{seq}", sequence_order=seq,
-                title=PHASE_TITLES.get(phase, f"Phase {seq}"),
+                title=ttl,
                 description=PHASE_DESC.get(phase, "Work through these courses in order."),
                 estimated_hours=est_hours, estimated_weeks=max(1, round(est_hours / max(1, weekly))),
                 status="in_progress" if seq == 1 else "not_started",

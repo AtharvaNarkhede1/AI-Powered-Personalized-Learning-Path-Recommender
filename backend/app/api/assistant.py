@@ -1,5 +1,5 @@
 """
-AI Conversational Assistant & RAG API Router.
+AI Conversational Assistant API Router.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -14,8 +14,8 @@ router = APIRouter(prefix="/api/assistant", tags=["AI Assistant"])
 
 @router.post("/chat", response_model=ChatResponse)
 def chat_with_assistant(payload: ChatRequest, db: Session = Depends(get_db)):
-    """Conversational AI Assistant supporting Gemini/OpenAI API or grounded offline RAG fallback,
-    grounded in this specific user's real profile and active path (not a shared global cache)."""
+    """Grounded assistant: answers only from this learner's real profile, path,
+    skill gaps and personalised ranker weights (LLM used if an env key is set)."""
     profile_row = db.query(LearnerProfileDB).filter(LearnerProfileDB.user_id == payload.user_id).first()
 
     profile = ProfileOnboardingRequest(
@@ -23,7 +23,11 @@ def chat_with_assistant(payload: ChatRequest, db: Session = Depends(get_db)):
         engineering_branch=profile_row.engineering_branch if profile_row else "Engineering",
         known_skills=profile_row.known_skills if profile_row else [],
         interests=profile_row.interests if profile_row else [],
+        experience_level=profile_row.experience_level if profile_row else "Intermediate",
         hours_per_week=profile_row.hours_per_week if profile_row else 10,
+        preferred_format=profile_row.preferred_format if profile_row else "project-based",
+        target_timeline_months=profile_row.target_timeline_months if profile_row else 6,
+        target_career_id=(profile_row.target_career_id if profile_row else None),
     )
 
     active_path = None
@@ -35,5 +39,7 @@ def chat_with_assistant(payload: ChatRequest, db: Session = Depends(get_db)):
         message=payload.message,
         profile=profile,
         current_path=active_path,
-        context_career_id=career_id
+        context_career_id=career_id,
+        db=db,
+        profile_id=(profile_row.id if profile_row else None),
     )

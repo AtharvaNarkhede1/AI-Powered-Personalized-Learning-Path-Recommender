@@ -77,7 +77,5 @@ export const api = {
   // Analytics & System
   getDashboardMetrics: (profileData, targetCareerId = 'robotics_eng') =>
     fetchJSON(`/analytics/dashboard?target_career_id=${encodeURIComponent(targetCareerId)}`, { method: 'POST', body: JSON.stringify(profileData) }),
-  getSystemStatus: () => fetchJSON('/system/status'),
-  configureKeys: (geminiKey, openaiKey) =>
-    fetchJSON('/system/keys', { method: 'POST', body: JSON.stringify({ gemini_api_key: geminiKey, openai_api_key: openaiKey }) })
+  getSystemStatus: () => fetchJSON('/system/status')
 };

@@ -1,11 +1,20 @@
 """
 Deterministic synthetic course-catalog generator.
 
-Writes `backend/app/data/courses.csv` -- a PathWise-style engineering course
-dataset that the ML engine (app/ml/) fits its TF-IDF+SVD semantic space and
-prerequisite DAG on.
+Writes `backend/app/data/courses.csv` -- a large, diverse PathWise-style
+engineering course dataset that the ML engine (app/ml/) fits its TF-IDF+SVD
+semantic space and prerequisite DAG on.
+
+Coverage:
+  * every skill in SKILLS_DATABASE, taught across every engineering branch
+    that any career using that skill belongs to (cross-branch coverage)
+  * per-career applied specialisation tracks
+  * each (skill, branch, tier) rung offered as several distinct course
+    "angles" (hands-on / project / theory / crash / exam-prep / industry)
+    so the text has real discriminative signal, not near-duplicates
 
 Run:  python -m scripts.generate_dataset
+Target size ~18,000 rows.
 """
 from __future__ import annotations
 
@@ -14,14 +23,16 @@ import os
 import random
 import sys
 
-# allow `python scripts/generate_dataset.py` as well as `-m scripts.generate_dataset`
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.data.taxonomy_data import CAREERS_DATABASE, SKILLS_DATABASE  # noqa: E402
+from app.data.taxonomy_data import (  # noqa: E402
+    CAREERS_DATABASE, SKILLS_DATABASE, ENGINEERING_BRANCHES as ENG_BRANCHES,
+)
 
 SEED = 42
 OUT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "app", "data", "courses.csv")
+TARGET_ROWS = 18000
 
 COLUMNS = [
     "course_id", "branch", "track", "course_title", "difficulty_level", "provider",
@@ -30,163 +41,234 @@ COLUMNS = [
     "career_paths", "industry_sectors",
 ]
 
-PROVIDERS = ["NPTEL", "Coursera", "edX", "Udacity", "Pluralsight", "MITx", "Udemy", "LinkedIn Learning"]
-FORMATS = ["Video Course", "Interactive Lab", "Project-Based", "Instructor-led Live", "Self-paced Reading"]
+PROVIDERS = ["NPTEL", "Coursera", "edX", "Udacity", "Pluralsight", "MITx", "Udemy",
+             "LinkedIn Learning", "DataCamp", "Great Learning"]
+FREE_PROVIDERS = {"NPTEL", "MITx", "edX"}
 
 TIERS = ["Beginner", "Intermediate", "Advanced", "Capstone"]
-TIER_TITLE = {
-    "Beginner": "{t}: Foundations",
-    "Intermediate": "{t} in Practice",
-    "Advanced": "{t}: Deep Dive",
-    "Capstone": "{t} Capstone Project",
+TIER_LABEL = {"Beginner": "Foundations", "Intermediate": "Applied",
+              "Advanced": "Advanced", "Capstone": "Capstone"}
+TIER_HOURS = {"Beginner": 14, "Intermediate": 24, "Advanced": 38, "Capstone": 50}
+TIER_ADJ = {"Beginner": "a foundational introduction to",
+            "Intermediate": "a practical, applied treatment of",
+            "Advanced": "an in-depth advanced study of",
+            "Capstone": "a portfolio capstone built around"}
+
+# distinct course "angles" -- each shifts vocabulary, format, hours and extra skills
+ANGLES = [
+    {"name": "", "fmt": "Video Course", "hmul": 1.0, "extra": [],
+     "blurb": "structured lectures with graded assignments and readings"},
+    {"name": "Hands-On Lab", "fmt": "Interactive Lab", "hmul": 1.15, "extra": ["lab exercises", "debugging practice"],
+     "blurb": "a lab-first course: you build and break things every module, guided walkthroughs, no long lectures"},
+    {"name": "Project Track", "fmt": "Project-Based", "hmul": 1.3, "extra": ["portfolio project", "real-world scenario"],
+     "blurb": "one large end-to-end project delivered in stages, code review, a shippable portfolio outcome"},
+    {"name": "Deep Theory", "fmt": "Self-paced Reading", "hmul": 1.1, "extra": ["first principles", "derivations", "research context"],
+     "blurb": "a rigorous first-principles course with proofs, derivations and links to current research"},
+    {"name": "Crash Course", "fmt": "Video Course", "hmul": 0.55, "extra": ["essentials only", "weekend intensive"],
+     "blurb": "a condensed, fast-paced overview of only the essentials, doable in a weekend"},
+    {"name": "Interview & Exam Prep", "fmt": "Interactive Lab", "hmul": 0.8, "extra": ["interview preparation", "certification objectives", "timed practice"],
+     "blurb": "problem sets, mock interviews and certification objectives with timed practice tests"},
+    {"name": "Industry Practicum", "fmt": "Instructor-led Live", "hmul": 1.2, "extra": ["industry case studies", "production workflows", "tooling"],
+     "blurb": "industry case studies and production workflows taught by practitioners, live cohort"},
+]
+
+DESC_TEMPLATES = [
+    "This course is {adj} {track} for {branch} learners -- {blurb}. You practise {skills} using {tools}. Typical next roles: {careers}.",
+    "{track} taught as {blurb}. Aimed at {branch} students and career changers. Core skills: {skills}. Tools: {tools}. Prepares you for work as {careers}.",
+    "A {branch}-focused path through {track}. {Blurb_cap}. Covers {skills}; hands-on with {tools}. Graduates move into roles like {careers}.",
+    "Learn {track} the applied way -- {blurb}. Skills built: {skills}. Toolchain: {tools}. Relevant careers: {careers}.",
+]
+
+# skill category -> tools + industry sectors (branch is now computed per-skill)
+CATEGORY_TOOLS = {
+    "Software": (["python", "git", "vs code", "pytest"], ["software", "technology"]),
+    "Web": (["javascript", "typescript", "react", "node.js", "docker", "postgres"], ["software", "web", "startups"]),
+    "Data": (["python", "sql", "spark", "airflow", "dbt", "pandas"], ["analytics", "technology", "finance"]),
+    "AI/ML": (["python", "pytorch", "scikit-learn", "numpy", "hugging face"], ["artificial intelligence", "technology"]),
+    "AI/Hardware": (["python", "tensorrt", "c++", "onnx", "jetson"], ["edge ai", "robotics"]),
+    "Mathematics": (["numpy", "matlab", "sympy"], ["research", "analytics"]),
+    "Security": (["linux", "wireshark", "python", "burp suite", "nmap", "metasploit"], ["cybersecurity", "technology"]),
+    "Systems": (["linux", "bash", "docker", "systemd"], ["cloud", "infrastructure"]),
+    "DevOps": (["docker", "kubernetes", "terraform", "aws", "prometheus", "github actions"], ["cloud", "infrastructure"]),
+    "Cloud": (["aws", "terraform", "kubernetes", "cloudformation"], ["cloud", "infrastructure"]),
+    "Hardware": (["c", "stm32", "oscilloscope", "keil", "logic analyzer"], ["embedded", "hardware"]),
+    "Semiconductors": (["verilog", "systemverilog", "modelsim", "vivado", "cadence"], ["semiconductors", "hardware"]),
+    "Robotics": (["ros 2", "c++", "gazebo", "python", "moveit"], ["robotics", "automation"]),
+    "Robotics/EE": (["matlab", "simulink", "python", "control toolbox"], ["robotics", "control systems"]),
+    "IoT": (["esp32", "mqtt", "c", "aws iot", "zephyr"], ["iot", "smart devices"]),
+    "Quality": (["playwright", "selenium", "pytest", "github actions", "k6"], ["software", "quality"]),
+    "Energy": (["etap", "matlab", "pvsyst", "homer pro", "digsilent"], ["energy", "utilities", "sustainability"]),
+    "Automotive": (["matlab", "simulink", "canalyzer", "dspace"], ["automotive", "mobility"]),
+    "Automotive/EE": (["matlab", "simulink", "canoe"], ["automotive", "mobility"]),
+    "Mechanical": (["solidworks", "ansys", "fusion360", "creo"], ["manufacturing", "product design"]),
+    "Civil": (["etabs", "staad pro", "revit", "autocad", "sap2000"], ["construction", "infrastructure"]),
+    "Aerospace": (["matlab", "ansys fluent", "xflr5", "openvsp"], ["aerospace", "defense"]),
+    "Chemical": (["aspen plus", "dwsim", "matlab", "hysys"], ["chemical", "process industry"]),
+    "Biomedical": (["matlab", "labview", "python", "comsol"], ["medical devices", "healthcare"]),
+    "General": (["python", "excel"], ["technology"]),
 }
-TIER_HOURS = {"Beginner": 12, "Intermediate": 22, "Advanced": 36, "Capstone": 46}
-
-# skill category -> (engineering branch, tools, industry sectors)
-CATEGORY_MAP = {
-    "Software": ("Computer Engineering / IT", ["python", "git", "vs code"], ["software", "technology"]),
-    "Web": ("Computer Engineering / IT", ["javascript", "react", "node.js", "docker"], ["software", "web", "startups"]),
-    "Data": ("Computer Engineering / IT", ["python", "sql", "spark", "airflow"], ["analytics", "technology", "finance"]),
-    "AI/ML": ("Computer Engineering / IT", ["python", "pytorch", "scikit-learn", "numpy"], ["artificial intelligence", "technology"]),
-    "AI/Hardware": ("Electronics & Communication Engineering", ["python", "tensorrt", "c++"], ["edge ai", "robotics"]),
-    "Mathematics": ("Computer Engineering / IT", ["numpy", "matlab"], ["research", "analytics"]),
-    "Security": ("Computer Engineering / IT", ["linux", "wireshark", "python", "burp suite"], ["cybersecurity", "technology"]),
-    "Systems": ("Computer Engineering / IT", ["linux", "bash", "docker"], ["cloud", "infrastructure"]),
-    "DevOps": ("Computer Engineering / IT", ["docker", "kubernetes", "terraform", "aws"], ["cloud", "infrastructure"]),
-    "Cloud": ("Computer Engineering / IT", ["aws", "terraform", "kubernetes"], ["cloud", "infrastructure"]),
-    "Hardware": ("Electronics & Communication Engineering", ["c", "stm32", "oscilloscope", "keil"], ["embedded", "hardware"]),
-    "Semiconductors": ("Electronics & Communication Engineering", ["verilog", "modelsim", "vivado"], ["semiconductors", "hardware"]),
-    "Robotics": ("Robotics / Mechatronics", ["ros 2", "c++", "gazebo", "python"], ["robotics", "automation"]),
-    "Robotics/EE": ("Robotics / Mechatronics", ["matlab", "simulink", "python"], ["robotics", "control systems"]),
-    "IoT": ("Electronics & Communication Engineering", ["esp32", "mqtt", "c", "aws iot"], ["iot", "smart devices"]),
-    "Quality": ("Computer Engineering / IT", ["playwright", "selenium", "pytest", "github actions"], ["software", "quality"]),
-    "Energy": ("Electrical Engineering", ["etap", "matlab", "pvsyst"], ["energy", "utilities", "sustainability"]),
-    "Automotive": ("Automobile Engineering", ["matlab", "simulink", "canalyzer"], ["automotive", "mobility"]),
-    "Automotive/EE": ("Automobile Engineering", ["matlab", "simulink"], ["automotive", "mobility"]),
-    "Mechanical": ("Mechanical Engineering", ["solidworks", "ansys", "fusion360"], ["manufacturing", "product design"]),
-    "Civil": ("Civil Engineering", ["etabs", "staad pro", "revit", "autocad"], ["construction", "infrastructure"]),
-    "Aerospace": ("Aerospace Engineering", ["matlab", "ansys fluent", "xflr5"], ["aerospace", "defense"]),
-    "Chemical": ("Chemical Engineering", ["aspen plus", "dwsim", "matlab"], ["chemical", "process industry"]),
-    "Biomedical": ("Biomedical Engineering", ["matlab", "labview", "python"], ["medical devices", "healthcare"]),
-    "General": ("Computer Engineering / IT", ["python"], ["technology"]),
+CATEGORY_HOME_BRANCH = {
+    "Software": "Computer Engineering / IT", "Web": "Computer Engineering / IT",
+    "Data": "Computer Engineering / IT", "AI/ML": "Computer Engineering / IT",
+    "AI/Hardware": "Electronics & Communication Engineering", "Mathematics": "Computer Engineering / IT",
+    "Security": "Computer Engineering / IT", "Systems": "Computer Engineering / IT",
+    "DevOps": "Computer Engineering / IT", "Cloud": "Computer Engineering / IT",
+    "Hardware": "Electronics & Communication Engineering", "Semiconductors": "Electronics & Communication Engineering",
+    "Robotics": "Robotics / Mechatronics", "Robotics/EE": "Robotics / Mechatronics",
+    "IoT": "Electronics & Communication Engineering", "Quality": "Computer Engineering / IT",
+    "Energy": "Electrical Engineering", "Automotive": "Automobile Engineering",
+    "Automotive/EE": "Automobile Engineering", "Mechanical": "Mechanical Engineering",
+    "Civil": "Civil Engineering", "Aerospace": "Aerospace Engineering",
+    "Chemical": "Chemical Engineering", "Biomedical": "Biomedical Engineering",
+    "General": "Computer Engineering / IT",
 }
 
-DESC_TMPL = (
-    "{tier_adj} {track} for engineering learners. Covers {skills}. "
-    "Hands-on work with {tools}. Prepares you for roles such as {careers}."
-)
-TIER_ADJ = {"Beginner": "A foundational introduction to", "Intermediate": "A practical, applied course on",
-            "Advanced": "An in-depth advanced treatment of", "Capstone": "A portfolio capstone built around"}
+
+def _skill_name(sid: str) -> str:
+    return SKILLS_DATABASE.get(sid, {}).get("name", sid)
 
 
-def _careers_for_skill(skill_id: str) -> list[str]:
-    out = []
+def _careers_for_skill(sid: str) -> list[str]:
+    return [c["title"] for c in CAREERS_DATABASE
+            if any(r["skill_id"] == sid for r in c["required_skills"])]
+
+
+def _branches_for_skill(sid: str) -> list[str]:
+    """Ordered by importance: skill's home branch + primary branches of careers
+    that require it first, then compatible branches. Capped so the dataset stays
+    bounded but every skill still spans several branches."""
+    s = SKILLS_DATABASE.get(sid, {})
+    primary: list[str] = [CATEGORY_HOME_BRANCH.get(s.get("category", "General"), "Computer Engineering / IT")]
+    secondary: list[str] = []
     for c in CAREERS_DATABASE:
-        if any(r["skill_id"] == skill_id for r in c["required_skills"]):
-            out.append(c["title"])
-    return out
+        if any(r["skill_id"] == sid for r in c["required_skills"]):
+            primary.append(c["branch_primary"])
+            secondary.extend(b for b in c.get("branches_compatible", []) if b in ENG_BRANCHES)
+    ordered: list[str] = []
+    for b in primary + secondary:
+        if b not in ordered:
+            ordered.append(b)
+    return ordered[:5]
 
 
-def _skill_name(skill_id: str) -> str:
-    return SKILLS_DATABASE.get(skill_id, {}).get("name", skill_id)
+def _canonical_title(skill: str, tier: str) -> str:
+    return f"{skill}: {TIER_LABEL[tier]}"
+
+
+def _course_title(skill: str, tier: str, angle: str) -> str:
+    base = _canonical_title(skill, tier)
+    return base if not angle else f"{base} — {angle}"
 
 
 def generate_rows() -> list[dict]:
     rnd = random.Random(SEED)
     rows: list[dict] = []
     seen_ids: set[str] = set()
+    counter = 0
 
-    # index: skill_id -> its Beginner-tier course title, used for cross-track
-    # prerequisite edges ("Intro to ML" requires "Intro to Python", NOT advanced Python)
-    beg_title_of: dict[str, str] = {}
-    for sid, s in SKILLS_DATABASE.items():
-        beg_title_of[sid] = TIER_TITLE["Beginner"].format(t=s.get("name", sid))
+    def new_id() -> str:
+        nonlocal counter
+        counter += 1
+        return f"C{counter:06d}"
 
-    def emit_track(track: str, branch: str, cat: str, skills_cum: dict, career_paths: list[str],
-                   cross_prereq_title: str | None, id_prefix: str):
-        tools = CATEGORY_MAP.get(cat, CATEGORY_MAP["General"])[1]
-        sectors = CATEGORY_MAP.get(cat, CATEGORY_MAP["General"])[2]
-        prev_title = ""
-        for ti, tier in enumerate(TIERS):
-            title = TIER_TITLE[tier].format(t=track)
-            if tier == "Beginner":
-                prereq = cross_prereq_title or ""
-            else:
-                prereq = prev_title
-            n_providers = rnd.randint(3, 6)
-            for prov in rnd.sample(PROVIDERS, n_providers):
-                cid = f"{id_prefix}-{ti}-{abs(hash(prov)) % 1000:03d}"
+    def emit_track(track: str, branch: str, cat: str, career_paths: list[str],
+                   skill_by_tier: dict, cross_prereq_title: str | None,
+                   variants_per_rung: int):
+        tools, sectors = CATEGORY_TOOLS.get(cat, CATEGORY_TOOLS["General"])
+        prev_canonical = ""
+        for tier in TIERS:
+            canonical = _canonical_title(track, tier)
+            prereq_for_tier = (cross_prereq_title or "") if tier == "Beginner" else prev_canonical
+
+            # always include the standard ("") angle with one provider so prereq
+            # titles resolve, then a deterministic sample of distinct
+            # (angle, provider) combos for the rest
+            combos = [(a, p) for a in ANGLES for p in PROVIDERS]
+            rnd.shuffle(combos)
+            std_prov = rnd.choice(PROVIDERS)
+            picks = [(ANGLES[0], std_prov)]
+            for a, p in combos:
+                if len(picks) >= max(1, variants_per_rung):
+                    break
+                if (a["name"], p) == (ANGLES[0]["name"], std_prov):
+                    continue
+                picks.append((a, p))
+            for angle, prov in picks:
+                cid = new_id()
                 if cid in seen_ids:
                     continue
                 seen_ids.add(cid)
-                hours = max(6, int(rnd.gauss(TIER_HOURS[tier], 6)))
-                skills_taught = "; ".join(skills_cum[tier])
+                base_h = TIER_HOURS[tier] * angle["hmul"]
+                hours = max(4, int(rnd.gauss(base_h, base_h * 0.15)))
+                sk = list(dict.fromkeys(skill_by_tier[tier] + angle["extra"]))
+                tset = list(dict.fromkeys(tools + rnd.sample(tools, 1)))
+                tmpl = rnd.choice(DESC_TEMPLATES)
+                blurb = angle["blurb"]
+                desc = tmpl.format(
+                    adj=TIER_ADJ[tier], track=track, branch=branch, blurb=blurb,
+                    Blurb_cap=blurb[0].upper() + blurb[1:],
+                    skills=", ".join(sk[:5]), tools=", ".join(tset[:4]),
+                    careers=", ".join(career_paths[:3]) if career_paths else "engineering practice",
+                )
                 rows.append({
-                    "course_id": cid,
-                    "branch": branch,
-                    "track": track,
-                    "course_title": title,
-                    "difficulty_level": tier,
-                    "provider": prov,
-                    "format": rnd.choice(FORMATS),
-                    "description": DESC_TMPL.format(
-                        tier_adj=TIER_ADJ[tier], track=track,
-                        skills=", ".join(skills_cum[tier][:4]),
-                        tools=", ".join(tools[:3]),
-                        careers=", ".join(career_paths[:3]) if career_paths else "engineering practice"),
-                    "skills_taught": skills_taught,
-                    "tools_covered": "; ".join(tools),
-                    "prerequisite_course_title": prereq,
+                    "course_id": cid, "branch": branch, "track": track,
+                    "course_title": _course_title(track, tier, angle["name"]),
+                    "difficulty_level": tier, "provider": prov, "format": angle["fmt"],
+                    "description": desc,
+                    "skills_taught": "; ".join(sk),
+                    "tools_covered": "; ".join(tset),
+                    "prerequisite_course_title": prereq_for_tier,
                     "estimated_hours": hours,
-                    "rating": round(min(4.9, max(3.5, rnd.gauss(4.3, 0.32))), 1),
-                    "num_reviews": rnd.randint(120, 6000),
+                    "rating": round(min(4.9, max(3.4, rnd.gauss(4.35, 0.33))), 1),
+                    "num_reviews": int(abs(rnd.gauss(1500, 1400))) + 40,
                     "career_paths": "; ".join(career_paths),
                     "industry_sectors": "; ".join(sectors),
                 })
-            prev_title = title
+            prev_canonical = canonical
 
-    # 1) one 4-tier track per skill in the taxonomy
-    for idx, (sid, s) in enumerate(sorted(SKILLS_DATABASE.items())):
-        cat = s.get("category", "General")
-        branch = CATEGORY_MAP.get(cat, CATEGORY_MAP["General"])[0]
+    # ---------------------------------------------------------------
+    # 1) skill x branch tracks (cross-branch coverage)
+    skill_ids = sorted(SKILLS_DATABASE.keys())
+    n_skill_branch = sum(len(_branches_for_skill(s)) for s in skill_ids)
+    n_career_specs = len(CAREERS_DATABASE)
+    # ~4 tiers per track; solve variants-per-rung to hit TARGET_ROWS
+    vpr = max(4, round(TARGET_ROWS / (4 * (n_skill_branch + n_career_specs))))
+    vpr = min(vpr, len(ANGLES) * len(PROVIDERS))
+
+    for sid in skill_ids:
+        s = SKILLS_DATABASE[sid]
         name = s.get("name", sid)
+        cat = s.get("category", "General")
         prereq_names = [_skill_name(p) for p in s.get("prerequisites", [])]
-        base = [name] + prereq_names
-        skills_cum = {
-            "Beginner": prereq_names[:1] + [name] if prereq_names else [name],
-            "Intermediate": base,
-            "Advanced": base + [f"{name} optimization"],
-            "Capstone": base + [f"{name} system design", f"{name} portfolio project"],
-        }
-        # dedupe preserve order
-        for k in skills_cum:
-            skills_cum[k] = list(dict.fromkeys([x for x in skills_cum[k] if x]))
         cross = None
-        prereqs = s.get("prerequisites", [])
-        if prereqs:
-            cross = beg_title_of.get(prereqs[0])
-        emit_track(name, branch, cat, skills_cum, _careers_for_skill(sid), cross, f"SK{idx:03d}")
+        if s.get("prerequisites"):
+            cross = _canonical_title(_skill_name(s["prerequisites"][0]), "Beginner")
+        base = [name] + prereq_names
+        skill_by_tier = {
+            "Beginner": list(dict.fromkeys(prereq_names[:1] + [name])),
+            "Intermediate": list(dict.fromkeys(base)),
+            "Advanced": list(dict.fromkeys(base + [f"{name} optimisation", "performance tuning"])),
+            "Capstone": list(dict.fromkeys(base + [f"{name} system design", "end-to-end project"])),
+        }
+        for branch in _branches_for_skill(sid):
+            emit_track(name, branch, cat, _careers_for_skill(sid), skill_by_tier, cross, vpr)
 
-    # 2) per-career applied specialization tracks
-    for cidx, c in enumerate(CAREERS_DATABASE):
+    # ---------------------------------------------------------------
+    # 2) one concrete "role capstone" track per career (a single integrative
+    #    track, not a generic umbrella that would crowd out the real skill
+    #    courses in ranking)
+    for c in CAREERS_DATABASE:
         branch = c["branch_primary"]
-        crit = [r for r in c["required_skills"] if r.get("critical")] or c["required_skills"]
-        specs = [
-            (f"{c['title']} Foundations", [r["name"] for r in crit[:3]]),
-            (f"{c['title']} Systems Practicum", [r["name"] for r in c["required_skills"][:4]]),
-            (f"{c['title']} Industry Capstone", [r["name"] for r in c["required_skills"]]),
-        ]
-        # infer a category for tools from the first required skill
         first_cat = SKILLS_DATABASE.get(c["required_skills"][0]["skill_id"], {}).get("category", "General")
-        for si, (track, sk) in enumerate(specs):
-            sk = list(dict.fromkeys(sk)) or [c["title"]]
-            skills_cum = {
-                "Beginner": sk[:2],
-                "Intermediate": sk,
-                "Advanced": sk + ["system integration"],
-                "Capstone": sk + ["end-to-end portfolio project", "job-readiness review"],
-            }
-            emit_track(track, branch, first_cat, skills_cum, [c["title"]], None, f"CR{cidx:02d}{si}")
+        sk = list(dict.fromkeys(r["name"] for r in c["required_skills"]))
+        track = f"{c['title']} Portfolio"
+        skill_by_tier = {
+            "Beginner": sk[:2] + ["engineering project workflow"],
+            "Intermediate": sk[:4],
+            "Advanced": sk + ["system integration"],
+            "Capstone": sk + ["end-to-end portfolio project", "job-readiness review", "technical interview prep"],
+        }
+        emit_track(track, branch, first_cat, [c["title"]], skill_by_tier, None, vpr)
 
     return rows
 
@@ -199,9 +281,11 @@ def main():
         w.writeheader()
         w.writerows(rows)
     branches = sorted({r["branch"] for r in rows})
+    tracks = {r["track"] for r in rows}
+    careers = {p for r in rows for p in r["career_paths"].split("; ") if p}
     print(f"wrote {len(rows)} courses -> {OUT_PATH}")
-    print(f"tracks: {len({r['track'] for r in rows})} | branches: {len(branches)}")
-    print(f"careers referenced: {len({p for r in rows for p in r['career_paths'].split('; ') if p})}")
+    print(f"tracks: {len(tracks)} | branches: {len(branches)} | careers referenced: {len(careers)}")
+    print("branches:", ", ".join(branches))
 
 
 if __name__ == "__main__":
