@@ -1,43 +1,38 @@
 # Architecture
 
-## Overview
+## Stack
 
-Career PathFinder is split into a stateless-ish FastAPI backend and a React
-(Vite) single-page frontend. The backend holds all "intelligence": learner
-profiling, recommendations, path generation, progress tracking, and the AI
-assistant. The frontend is a thin client that renders whatever the backend
-returns.
+- **Backend**: FastAPI + SQLAlchemy (SQLite by default, swap `DATABASE_URL` for Postgres in production). No in-memory caches -- every learner's profile, path, feedback, and assessment history is persisted per-user in the DB (`app/db/models.py`).
+- **Frontend**: React (Vite), single-page tab-based UI in `App.jsx` (no client-side routing).
+- **AI/ML**: local `sentence-transformers` embeddings for semantic skill/interest/career matching (`app/services/embedding_service.py`), with an optional Gemini/OpenAI LLM layer for the chat assistant that falls back to a grounded offline rule engine if no API key is configured.
 
-```
-frontend (React)  <-- REST/JSON -->  backend (FastAPI)
-                                         |
-                                         v
-                              app/data/*.json (course catalog, goal->skill map)
-                              app/db.py (in-memory learner state - swap for a
-                                         real DB before production)
-```
+## Backend layout (`backend/app/`)
 
-## Backend modules (backend/app/)
+- `api/` -- FastAPI routers, one per domain: `auth`, `onboarding`, `careers`, `skills`, `recommendations`, `paths`, `assessments`, `assistant`, `analytics`, `system`.
+- `services/` -- business logic, called by routers:
+  - `career_engine.py` -- career discovery/matching (branch fit, semantic interest/skill similarity, experience-vs-required-level fit).
+  - `skill_gap_engine.py` -- per-skill gap analysis; prefers a quiz-verified proficiency (`SkillProficiencyDB`) over the self-reported estimate when one exists.
+  - `graph_engine.py` -- builds the skill prerequisite DAG (NetworkX) and topologically sorts target skills.
+  - `path_generator.py` -- assembles the milestone roadmap from the sorted skill list + ranked resources.
+  - `recommendation_engine.py` -- two-stage resource retrieval + multi-factor ranking (rating, semantic relevance, format/difficulty fit, upvote/downvote feedback).
+  - `adaptive_engine.py` / `readiness_calculator.py` -- readiness scoring; `readiness_calculator` is the source of truth, recomputed from real skill-gap data after a quiz.
+  - `what_not_to_do_engine.py` -- personalized pitfall warnings.
+  - `embedding_service.py` -- local semantic similarity (falls back to substring/token overlap if `sentence-transformers` isn't installed, so the app never hard-crashes on a missing optional dependency).
+  - `youtube_service.py` -- real YouTube Data API v3 results when `YOUTUBE_API_KEY` is set; otherwise a plain search link (no fabricated ratings).
+  - `ai_assistant.py` -- chat assistant, grounded in the user's real profile/career/skill-gap data (Gemini / OpenAI / offline rule engine).
+  - `path_store.py` -- DB persistence helpers (profile upsert, active-path read/write, feedback history) used by the routers instead of module-level caches.
+- `data/taxonomy_data.py` -- the curated static catalog: engineering branches, careers, skills (with YouTube resources), and diagnostic quizzes. This is hand-authored content, not scraped.
+- `db/models.py` -- SQLAlchemy models: `User`, `LearnerProfileDB`, `SkillProficiencyDB`, `LearningPathDB`/`MilestoneDB`, `UserFeedbackDB`, `AssessmentSubmissionDB`, `ChatMessageDB`.
+- `models/schemas.py` -- Pydantic request/response contracts.
 
-| Module | Responsibility |
-|---|---|
-| `services/profiling_engine.py` | Builds/updates a `LearnerProfile` from form input or free-text chat (keyword + regex extraction). |
-| `services/recommendation_engine.py` | Scores the course catalog against a learner's goal/interests/skill level/completed courses. |
-| `services/path_generator.py` | Orders relevant courses by prerequisite (topological sort), groups them into milestones, appends a capstone project. |
-| `services/progress_tracker.py` | Computes completion %, per-skill proficiency growth, and "next actions" from a learner's `LearningPath`. |
-| `services/ai_assistant.py` | Chat replies + "why was this recommended" explanations + free-form Q&A. Uses OpenAI if `OPENAI_API_KEY` is set, otherwise falls back to templated responses so the prototype runs offline. |
-| `api/*.py` | Thin FastAPI routers that wire the above services to HTTP endpoints. |
+## Data flow
 
-## Data flow for a typical session
+1. **Onboarding** (`POST /api/onboarding/{user_id}`) persists a `LearnerProfileDB` row.
+2. **Career discovery** (`POST /api/careers/discover`) scores every career in the static catalog against the profile (branch/interest/skill/experience fit) and returns top matches + clarification question if ambiguous.
+3. **Path generation** (`POST /api/paths/generate/{career_id}`) runs skill-gap analysis -> topological sort -> resource ranking -> milestone grouping, then persists the result. A second call for the same user+career returns the persisted path instead of regenerating (so completed-milestone progress isn't lost).
+4. **Quiz submission** (`POST /api/assessments/submit`) grades the quiz, writes a verified `SkillProficiencyDB` row, and recomputes readiness for that user's own active path only.
+5. **Feedback** (`POST /api/recommendations/feedback`) is persisted per-user and actually changes future resource ranking (upvote/downvote adjust the ranking score).
 
-1. Learner talks to the assistant (`POST /api/chat`) or fills the profile form (`PUT /api/profile/{id}`).
-2. `profiling_engine` extracts/updates fields on the `LearnerProfile`.
-3. Frontend calls `GET /api/recommend/{id}` to preview top course matches, each with a `reason` string.
-4. Learner generates a full roadmap (`POST /api/path/{id}/generate`) -> `path_generator` returns ordered `Milestone`s with prerequisites and an estimated hour total.
-5. As the learner progresses, `PUT /api/progress/{id}` updates milestone status; `GET /api/progress/{id}` (`progress_tracker`) recomputes the dashboard snapshot.
+## Known limitations / next steps
 
-## Known prototype limitations (see per-file TODOs)
-
-- State is in-memory (`app/db.py`) - restarting the backend wipes all learner data. Swap for SQLAlchemy + a real DB (`DATABASE_URL` is already wired up in `core/config.py`) before deploying for real users.
-- Recommendation scoring is a hand-tuned heuristic, not a trained model - documented as a TODO in `recommendation_engine.py` for when real interaction data exists.
-- No auth - `learner_id` is a client-generated random string stored in `localStorage`.
+See the improvement plan discussed with the maintainer: the static catalog (9 careers, ~45 skills after the taxonomy gap-fill) could be expanded via O*NET/ESCO; course *content* beyond YouTube (Coursera/edX) has no free public catalog API and isn't integrated.

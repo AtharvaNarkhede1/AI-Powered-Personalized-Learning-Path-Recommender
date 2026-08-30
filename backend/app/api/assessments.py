@@ -1,14 +1,16 @@
 """
 Assessments & Diagnostic Quizzes Router.
 """
-from fastapi import APIRouter, HTTPException
-from typing import List, Optional
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from app.db.database import get_db
+from app.db.models import AssessmentSubmissionDB, SkillProficiencyDB, LearnerProfileDB
 from app.models.schemas import (
-    AssessmentDetail, QuizSubmissionRequest, QuizSubmissionResponse
+    AssessmentDetail, QuizSubmissionRequest, QuizSubmissionResponse, ProfileOnboardingRequest
 )
 from app.data.taxonomy_data import QUIZZES_DATABASE
-from app.api.paths import PATH_CACHE
-from app.services.adaptive_engine import adapt_path_on_quiz_completion
+from app.services.skill_gap_engine import analyze_skill_gaps
+from app.services.path_store import get_active_path, save_path
 
 router = APIRouter(prefix="/api/assessments", tags=["Assessments & Diagnostic Quizzes"])
 
@@ -19,7 +21,7 @@ def get_quiz_by_skill(skill_id: str):
     if skill_id not in QUIZZES_DATABASE:
         # Fallback default quiz
         skill_id = "python_core"
-    
+
     data = QUIZZES_DATABASE[skill_id]
     return AssessmentDetail(
         id=data["assessment_id"],
@@ -32,8 +34,10 @@ def get_quiz_by_skill(skill_id: str):
 
 
 @router.post("/submit", response_model=QuizSubmissionResponse)
-def submit_quiz_answers(payload: QuizSubmissionRequest):
-    """Grades a quiz submission, updates skill proficiency, and triggers adaptive path updates."""
+def submit_quiz_answers(payload: QuizSubmissionRequest, db: Session = Depends(get_db)):
+    """Grades a quiz submission, persists a verified skill proficiency, and adapts this
+    user's own active path only (previously this looped over every cached path for every
+    user, a cross-user data-bleed bug)."""
     # Find matching quiz
     quiz_data = None
     for sid, qdata in QUIZZES_DATABASE.items():
@@ -68,9 +72,59 @@ def submit_quiz_answers(payload: QuizSubmissionRequest):
 
     feedback = f"Excellent! You scored {score_pct}%. Your proficiency level in {quiz_data['skill_name']} is updated." if passed else f"You scored {score_pct}%. We recommend reviewing prerequisite modules before re-testing."
 
-    # Update path if active
-    for cid, path in PATH_CACHE.items():
-        adapt_path_on_quiz_completion(path, quiz_data["skill_id"], score_pct)
+    # Persist the raw submission
+    db.add(AssessmentSubmissionDB(
+        user_id=payload.user_id,
+        assessment_id=quiz_data["assessment_id"],
+        skill_id=quiz_data["skill_id"],
+        score_percentage=score_pct,
+        answers=payload.answers,
+    ))
+
+    # Persist a verified skill proficiency -- this is what skill_gap_engine now
+    # prefers over the self-reported estimate once it exists.
+    profile_row = db.query(LearnerProfileDB).filter(LearnerProfileDB.user_id == payload.user_id).first()
+    if profile_row:
+        prof_row = (
+            db.query(SkillProficiencyDB)
+            .filter(SkillProficiencyDB.profile_id == profile_row.id, SkillProficiencyDB.skill_id == quiz_data["skill_id"])
+            .first()
+        )
+        if not prof_row:
+            prof_row = SkillProficiencyDB(profile_id=profile_row.id, skill_id=quiz_data["skill_id"], skill_name=quiz_data["skill_name"])
+            db.add(prof_row)
+        prof_row.current_proficiency = new_prof
+        prof_row.confidence = 0.9
+        prof_row.evidence_source = "assessment"
+
+    db.commit()
+
+    # Adapt only this user's own active path(s) for this skill's career context,
+    # instead of every cached path for every user.
+    if profile_row:
+        career_id = payload.career_id or profile_row.target_career_id
+        if career_id:
+            path = get_active_path(db, profile_row.id, career_id)
+            if path:
+                context_profile = ProfileOnboardingRequest(
+                    user_id=payload.user_id,
+                    engineering_branch=profile_row.engineering_branch,
+                    known_skills=profile_row.known_skills or [],
+                    experience_level=profile_row.experience_level,
+                    hours_per_week=profile_row.hours_per_week,
+                )
+                try:
+                    gap = analyze_skill_gaps(career_id, context_profile, db=db, profile_id=profile_row.id)
+                    total_req = sum(g.required_level for g in gap.gaps) or 0.1
+                    total_acq = sum(min(g.current_level, g.required_level) for g in gap.gaps)
+                    path.job_readiness_score = round(min(100.0, max(15.0, (total_acq / total_req) * 100)), 1)
+                except Exception:
+                    boost = 5.0 if score_pct >= 80 else (2.5 if score_pct >= 60 else 0.0)
+                    path.job_readiness_score = round(min(100.0, path.job_readiness_score + boost), 1)
+                path.next_action.action_type = "build_project"
+                path.next_action.title = "Build the milestone portfolio project"
+                path.next_action.description = f"You scored {score_pct}% -- apply it in the milestone project."
+                save_path(db, profile_row.id, path)
 
     return QuizSubmissionResponse(
         assessment_id=quiz_data["assessment_id"],

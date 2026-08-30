@@ -1,7 +1,0 @@
-{
-  "data scientist": ["python", "data-analysis", "machine-learning", "statistics", "sql"],
-  "machine learning engineer": ["python", "machine-learning", "deep-learning", "deployment"],
-  "frontend developer": ["html", "css", "javascript", "react"],
-  "backend developer": ["python", "backend", "apis", "sql", "cloud"],
-  "full stack developer": ["html", "css", "javascript", "react", "backend", "apis", "sql"]
-}

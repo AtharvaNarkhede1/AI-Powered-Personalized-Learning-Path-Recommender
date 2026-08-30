@@ -1,11 +1,12 @@
 import React from 'react';
-import { Compass, BookOpen, LayoutDashboard, MessageSquare, Sparkles, Key, CheckCircle, Zap } from 'lucide-react';
+import { Compass, BookOpen, LayoutDashboard, MessageSquare, Sparkles, Key, CheckCircle, Zap, GraduationCap } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, onOpenSettings, llmMode }) {
   const navItems = [
     { id: 'landing', label: 'Overview', icon: Sparkles },
     { id: 'onboarding', label: 'Onboarding', icon: Compass },
     { id: 'discovery', label: 'Career Discovery', icon: Compass },
+    { id: 'courses', label: 'Course Recommendations', icon: GraduationCap },
     { id: 'roadmap', label: 'Learning Roadmap', icon: BookOpen },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'assistant', label: 'AI Assistant', icon: MessageSquare }

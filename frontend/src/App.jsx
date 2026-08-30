@@ -3,6 +3,7 @@ import Navbar from './components/Navbar';
 import LandingPage from './components/LandingPage';
 import OnboardingWizard from './components/OnboardingWizard';
 import CareerDiscovery from './components/CareerDiscovery';
+import RecommendationsView from './components/RecommendationsView';
 import LearningPathTimeline from './components/LearningPathTimeline';
 import Dashboard from './components/Dashboard';
 import ChatInterface from './components/ChatInterface';
@@ -19,6 +20,7 @@ export default function App() {
 
   // Core State
   const [profile, setProfile] = useState({
+    user_id: 'demo_user_1',
     user_status: "Engineering Student",
     engineering_branch: "Mechanical Engineering",
     college_name: "HCL Institute of Technology",
@@ -36,6 +38,7 @@ export default function App() {
   });
 
   const [discoveryData, setDiscoveryData] = useState(null);
+  const [selectedCareerId, setSelectedCareerId] = useState(null);
   const [activePath, setActivePath] = useState(null);
   const [dashboardMetrics, setDashboardMetrics] = useState(null);
   
@@ -78,8 +81,9 @@ export default function App() {
     try {
       const authRes = await api.demoLogin();
       setUserId(authRes.user_id);
-      
-      const disc = await api.discoverCareers(profile);
+      setProfile(prev => ({ ...prev, user_id: authRes.user_id }));
+
+      const disc = await api.discoverCareers({ ...profile, user_id: authRes.user_id });
       setDiscoveryData(disc);
       setActiveTab('discovery');
     } catch (err) {
@@ -88,10 +92,11 @@ export default function App() {
   };
 
   const handleCompleteOnboarding = async (newProfile) => {
-    setProfile(newProfile);
+    const merged = { ...newProfile, user_id: userId };
+    setProfile(merged);
     try {
-      await api.saveOnboardingProfile(userId, newProfile);
-      const disc = await api.discoverCareers(newProfile);
+      await api.saveOnboardingProfile(userId, merged);
+      const disc = await api.discoverCareers(merged);
       setDiscoveryData(disc);
       setActiveTab('discovery');
     } catch (err) {
@@ -101,7 +106,9 @@ export default function App() {
 
   const handleSelectCareer = async (careerId) => {
     try {
-      const pathRes = await api.generatePath(careerId, profile);
+      setSelectedCareerId(careerId);
+      setProfile(prev => ({ ...prev, target_career_id: careerId }));
+      const pathRes = await api.generatePath(careerId, { ...profile, target_career_id: careerId });
       setActivePath(pathRes);
       
       const metrics = await api.getDashboardMetrics(profile, careerId);
@@ -157,10 +164,18 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'courses' && (
+          <RecommendationsView
+            userId={userId}
+            careerId={selectedCareerId || activePath?.career_id || null}
+          />
+        )}
+
         {activeTab === 'roadmap' && (
           <LearningPathTimeline
             path={activePath}
             profile={profile}
+            userId={userId}
             onCompleteMilestone={handleCompleteMilestone}
             onOpenQuiz={(skillId) => setQuizSkillId(skillId)}
           />
@@ -176,6 +191,7 @@ export default function App() {
         {activeTab === 'assistant' && (
           <ChatInterface
             activeCareerId={activePath?.career_id}
+            userId={userId}
           />
         )}
       </main>
@@ -184,6 +200,8 @@ export default function App() {
       {quizSkillId && (
         <QuizModal
           skillId={quizSkillId}
+          userId={userId}
+          careerId={activePath?.career_id}
           onClose={() => setQuizSkillId(null)}
           onQuizCompleted={() => {
             if (activePath) {

@@ -27,7 +27,7 @@ def submit_onboarding_profile(user_id: str, payload: ProfileOnboardingRequest, d
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             # Create user on the fly if needed
-            user = User(id=user_id, email=f"user_{user_id[:8]}@hcl.edu", hashed_password="pw", full_name="Learner")
+            user = User(id=user_id, email=f"user_{user_id}@hcl.edu", hashed_password="pw", full_name="Learner")
             db.add(user)
             db.commit()
 

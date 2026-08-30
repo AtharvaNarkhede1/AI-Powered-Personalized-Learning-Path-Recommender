@@ -30,6 +30,9 @@ class TokenResponse(BaseModel):
 # ---------- Learner Profile ----------
 
 class ProfileOnboardingRequest(BaseModel):
+    # Identity -- used to scope learning paths/feedback/assessments per user
+    # instead of a single shared in-memory cache.
+    user_id: str = "demo_user_1"
     # Step 1
     user_status: str = "Engineering Student"
     # Step 2
@@ -103,7 +106,7 @@ class CareerDiscoveryResponse(BaseModel):
 
 
 class CareerComparisonRequest(BaseModel):
-    career_ids: List[str] = Field(min_items=2, max_items=3)
+    career_ids: List[str] = Field(min_length=2, max_length=3)
 
 
 class CareerDetail(BaseModel):
@@ -162,19 +165,39 @@ class ResourceItem(BaseModel):
     match_reason: Optional[str] = None
     upvotes: int = 0
     downvotes: int = 0
+    # ---- dataset-driven course fields ----
+    course_id: Optional[str] = None
+    track: Optional[str] = None
+    branch: Optional[str] = None
+    num_reviews: int = 0
+    why_now: Optional[str] = None                 # "start here" / "take this after X"
+    unlocks: List[str] = Field(default_factory=list)
+    factor_contributions: Optional[Dict[str, float]] = None
 
 
 class RecommendationRequest(BaseModel):
+    goal_text: Optional[str] = None
     career_id: Optional[str] = None
+    limit: int = 12
+    exclude_planned: bool = False
+    user_id: str = "demo_user_1"
+    # legacy / optional filters (kept for back-compat)
     skill_filter: Optional[str] = None
     type_filter: Optional[str] = None
     max_duration_hours: Optional[float] = None
+
+
+class CourseRecommendationResponse(BaseModel):
+    goal: str
+    count: int
+    results: List[ResourceItem]
 
 
 class ResourceFeedbackRequest(BaseModel):
     resource_id: str
     feedback_type: str  # upvote, downvote, dismiss, completed
     comment: Optional[str] = None
+    user_id: str = "demo_user_1"
 
 
 # ---------- Learning Path & Milestones ----------
@@ -191,6 +214,7 @@ class Milestone(BaseModel):
     resources: List[ResourceItem]
     project: Optional[Dict[str, Any]] = None
     assessment: Optional[Dict[str, Any]] = None
+    youtube_extras: List[ResourceItem] = Field(default_factory=list)
 
 
 class NextRecommendedAction(BaseModel):
@@ -214,6 +238,7 @@ class LearningPathResponse(BaseModel):
     milestones: List[Milestone]
     next_action: NextRecommendedAction
     what_not_to_do_warnings: List[str]
+    track_names: List[str] = Field(default_factory=list)
 
 
 # ---------- Quiz & Assessments ----------
@@ -238,6 +263,8 @@ class AssessmentDetail(BaseModel):
 class QuizSubmissionRequest(BaseModel):
     assessment_id: str
     answers: Dict[str, int]  # question_id -> chosen option index
+    user_id: str = "demo_user_1"
+    career_id: Optional[str] = None  # if set, only this user's path for this career is adapted
 
 
 class QuizSubmissionResponse(BaseModel):
@@ -262,6 +289,7 @@ class ChatRequest(BaseModel):
     message: str
     context_career_id: Optional[str] = None
     chat_history: Optional[List[ChatMessageSchema]] = None
+    user_id: str = "demo_user_1"
 
 
 class ChatResponse(BaseModel):

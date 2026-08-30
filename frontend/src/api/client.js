@@ -1,7 +1,7 @@
 /**
  * API Client for interacting with FastAPI Backend endpoints.
  */
-const BASE_URL = 'http://127.0.0.1:8000/api';
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000') + '/api';
 
 async function fetchJSON(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
@@ -46,16 +46,17 @@ export const api = {
   analyzeSkillGaps: (careerId, profileData) =>
     fetchJSON(`/skills/analyze-gap/${careerId}`, { method: 'POST', body: JSON.stringify(profileData) }),
 
-  // Recommendations & Feedback
-  getRecommendations: (profileData, filters = {}) =>
+  // Course Recommendations & Feedback
+  getCourseRecommendations: ({ userId, goalText = null, careerId = null, limit = 12, excludePlanned = false }) =>
     fetchJSON('/recommendations/resources', {
       method: 'POST',
-      body: JSON.stringify({ ...filters, ...profileData })
+      body: JSON.stringify({ user_id: userId, goal_text: goalText, career_id: careerId, limit, exclude_planned: excludePlanned })
     }),
-  submitFeedback: (resourceId, feedbackType, comment = '') =>
+  getLearnerModel: (userId) => fetchJSON(`/recommendations/model/${userId}`),
+  submitFeedback: (resourceId, feedbackType, userId, comment = '') =>
     fetchJSON('/recommendations/feedback', {
       method: 'POST',
-      body: JSON.stringify({ resource_id: resourceId, feedback_type: feedbackType, comment })
+      body: JSON.stringify({ resource_id: resourceId, feedback_type: feedbackType, user_id: userId, comment })
     }),
 
   // Learning Path
@@ -66,16 +67,16 @@ export const api = {
 
   // Quizzes & Assessments
   getQuiz: (skillId) => fetchJSON(`/assessments/quiz/${skillId}`),
-  submitQuiz: (assessmentId, answers) =>
-    fetchJSON('/assessments/submit', { method: 'POST', body: JSON.stringify({ assessment_id: assessmentId, answers }) }),
+  submitQuiz: (assessmentId, answers, userId, careerId = null) =>
+    fetchJSON('/assessments/submit', { method: 'POST', body: JSON.stringify({ assessment_id: assessmentId, answers, user_id: userId, career_id: careerId }) }),
 
   // Assistant & Chat
-  sendChatMessage: (message, contextCareerId = null) =>
-    fetchJSON('/assistant/chat', { method: 'POST', body: JSON.stringify({ message, context_career_id: contextCareerId }) }),
+  sendChatMessage: (message, contextCareerId = null, userId) =>
+    fetchJSON('/assistant/chat', { method: 'POST', body: JSON.stringify({ message, context_career_id: contextCareerId, user_id: userId }) }),
 
   // Analytics & System
   getDashboardMetrics: (profileData, targetCareerId = 'robotics_eng') =>
-    fetchJSON('/analytics/dashboard', { method: 'POST', body: JSON.stringify(profileData) }),
+    fetchJSON(`/analytics/dashboard?target_career_id=${encodeURIComponent(targetCareerId)}`, { method: 'POST', body: JSON.stringify(profileData) }),
   getSystemStatus: () => fetchJSON('/system/status'),
   configureKeys: (geminiKey, openaiKey) =>
     fetchJSON('/system/keys', { method: 'POST', body: JSON.stringify({ gemini_api_key: geminiKey, openai_api_key: openaiKey }) })

@@ -9,7 +9,7 @@ const QUICK_PROMPTS = [
   "Compare Robotics vs AI Engineering"
 ];
 
-export default function ChatInterface({ activeCareerId }) {
+export default function ChatInterface({ activeCareerId, userId }) {
   const [messages, setMessages] = useState([
     {
       sender: 'assistant',
@@ -29,7 +29,7 @@ export default function ChatInterface({ activeCareerId }) {
     setLoading(true);
 
     try {
-      const res = await api.sendChatMessage(query, activeCareerId);
+      const res = await api.sendChatMessage(query, activeCareerId, userId);
       const botMsg = {
         sender: 'assistant',
         content: res.reply,

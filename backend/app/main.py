@@ -44,6 +44,16 @@ app.include_router(analytics.router)
 app.include_router(system.router)
 
 
+@app.on_event("startup")
+def _warm_ml_engine():
+    """Fit the TF-IDF+SVD semantic space and build the prerequisite DAG once."""
+    try:
+        from app.ml.engine import engine
+        engine.warm()
+    except Exception as e:  # never block the API from starting
+        print(f"[startup] ML engine warm failed: {e}")
+
+
 @app.get("/")
 def root_status():
     return {
