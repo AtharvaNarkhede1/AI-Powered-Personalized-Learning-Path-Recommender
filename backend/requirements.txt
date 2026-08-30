@@ -12,6 +12,7 @@ joblib==1.4.2
 # Persistence: MongoDB Atlas
 pymongo==4.9.1
 dnspython==2.6.1
+certifi==2024.8.30
 # Auth
 bcrypt==4.2.0
 pyjwt==2.9.0

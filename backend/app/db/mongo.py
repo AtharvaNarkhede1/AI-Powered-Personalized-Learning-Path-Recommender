@@ -1,8 +1,13 @@
 from __future__ import annotations
+import certifi
 from pymongo import ASCENDING, MongoClient
 from pymongo.errors import PyMongoError
 from app.core.config import settings
-_client: MongoClient = MongoClient(settings.MONGODB_URI, serverSelectionTimeoutMS=8000)
+_client_kwargs = {"serverSelectionTimeoutMS": 8000}
+if settings.MONGODB_URI.startswith("mongodb+srv://") or "mongodb.net" in settings.MONGODB_URI:
+    _client_kwargs["tls"] = True
+    _client_kwargs["tlsCAFile"] = certifi.where()
+_client: MongoClient = MongoClient(settings.MONGODB_URI, **_client_kwargs)
 db = _client[settings.MONGODB_DB]
 users = db["users"]
 profiles = db["profiles"]
