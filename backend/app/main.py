@@ -2,8 +2,10 @@
 Main FastAPI Application Entrypoint.
 Registers middleware, MongoDB + ML-engine startup, and API routers.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pymongo.errors import PyMongoError
 
 from app.core.config import settings
 from app.api import (
@@ -35,6 +37,14 @@ app.include_router(assessments.router)
 app.include_router(assistant.router)
 app.include_router(analytics.router)
 app.include_router(system.router)
+
+
+@app.exception_handler(PyMongoError)
+def _mongo_unavailable(request: Request, exc: PyMongoError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database is currently unavailable. Please try again shortly."},
+    )
 
 
 @app.on_event("startup")

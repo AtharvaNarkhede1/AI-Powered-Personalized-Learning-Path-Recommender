@@ -9,6 +9,10 @@ export function setAuthToken(token) {
   authToken = token || null;
 }
 
+// Endpoints where a 401 means "bad credentials", NOT "expired session" --
+// these run before the user has a token, so they must never trigger a logout.
+const AUTH_ENDPOINTS = ['/auth/login', '/auth/register'];
+
 async function fetchJSON(endpoint, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -17,12 +21,19 @@ async function fetchJSON(endpoint, options = {}) {
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
   const res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
-  if (res.status === 401) {
-    window.dispatchEvent(new CustomEvent('auth:logout'));
-    throw new Error('Session expired. Please sign in again.');
-  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    const isAuthCall = AUTH_ENDPOINTS.some((e) => endpoint.startsWith(e));
+
+    // Only a 401 on an authenticated request means the session is gone.
+    if (res.status === 401 && !isAuthCall) {
+      window.dispatchEvent(new CustomEvent('auth:logout'));
+      throw new Error('Session expired. Please sign in again.');
+    }
+    if (res.status === 503) {
+      throw new Error(err.detail || 'Service temporarily unavailable. Please try again shortly.');
+    }
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
   if (res.status === 204) return null;
@@ -42,6 +53,8 @@ export const api = {
   saveProfile: (profile) => fetchJSON('/onboarding/profile', body(profile)),
   searchKeywords: (q) => fetchJSON(`/onboarding/keywords/search?q=${encodeURIComponent(q)}`),
   parseResume: (text, exclude = []) => fetchJSON('/onboarding/parse-resume', body({ text, exclude })),
+  parseIntake: (text, excludeSkills = [], excludeInterests = []) =>
+    fetchJSON('/onboarding/parse-intake', body({ text, exclude_skills: excludeSkills, exclude_interests: excludeInterests })),
 
   // Careers
   discoverCareers: (profile) => fetchJSON('/careers/discover', body(profile)),

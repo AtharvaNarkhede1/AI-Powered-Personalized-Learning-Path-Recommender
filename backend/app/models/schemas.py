@@ -48,6 +48,24 @@ class ResumeParseResponse(BaseModel):
     detected_skills: List[DetectedSkill]
 
 
+class IntakeParseRequest(BaseModel):
+    text: str
+    exclude_skills: List[str] = Field(default_factory=list)
+    exclude_interests: List[str] = Field(default_factory=list)
+
+
+class IntakeParseResponse(BaseModel):
+    detected_skills: List[DetectedSkill]
+    detected_interests: List[str]
+    new_keywords: List[str]
+    hours_per_week: Optional[int] = None
+    experience_level: Optional[str] = None
+    user_status: Optional[str] = None
+    engineering_branch: Optional[str] = None
+    target_timeline_months: Optional[int] = None
+    summary: List[str]
+
+
 # ---------- Learner Profile ----------
 
 class ProfileOnboardingRequest(BaseModel):

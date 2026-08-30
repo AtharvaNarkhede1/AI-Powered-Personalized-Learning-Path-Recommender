@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { useAppData } from '../context/AppDataContext';
 import KeywordInput from '../components/KeywordInput';
-import ResumeImport from '../components/ResumeImport';
+import IntakeBox from '../components/IntakeBox';
 
 const BRANCHES = [
   'Computer Engineering / IT', 'Electronics & Communication Engineering', 'Electrical Engineering',
@@ -41,6 +41,7 @@ export default function ProfilePage() {
   }, [profile]);
 
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setSaved(false); };
+  const applyPatch = (patch) => { setForm((f) => ({ ...f, ...patch })); setSaved(false); };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -60,6 +61,10 @@ export default function ProfilePage() {
       <p className="muted" style={{ marginBottom: '1.75rem' }}>
         Keep this current — Find My Career and every recommendation is built from it.
       </p>
+
+      <div style={{ marginBottom: '1.5rem' }}>
+        <IntakeBox form={form} onApply={applyPatch} />
+      </div>
 
       <form onSubmit={submit} style={{ display: 'grid', gap: '1.5rem' }}>
         <div className="card" style={{ padding: '1.5rem', display: 'grid', gap: '1.1rem' }}>
@@ -96,6 +101,9 @@ export default function ProfilePage() {
 
         <div className="card" style={{ padding: '1.5rem', display: 'grid', gap: '1.25rem' }}>
           <h3 style={{ fontSize: '1rem' }}>Interests & skills</h3>
+          <p className="faint" style={{ fontSize: '0.8rem', marginTop: '-0.5rem' }}>
+            Pre-filled from what you wrote above. Add or remove anything.
+          </p>
           <KeywordInput
             label="Areas of technical interest"
             hint="Type any interest or pick from suggestions across 14 engineering branches."
@@ -111,10 +119,6 @@ export default function ProfilePage() {
             onChange={(v) => set('known_skills', v)}
             tone="good"
             placeholder="e.g. Python, SolidWorks, ROS 2"
-          />
-          <ResumeImport
-            existing={form.known_skills}
-            onAdd={(names) => set('known_skills', [...new Set([...form.known_skills, ...names])])}
           />
           <div>
             <label>Overall experience level</label>
