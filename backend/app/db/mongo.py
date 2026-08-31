@@ -3,11 +3,23 @@ import certifi
 from pymongo import ASCENDING, MongoClient
 from pymongo.errors import PyMongoError
 from app.core.config import settings
+from app.db import local_mongo
+
+# On Windows "localhost" resolves to IPv6 (::1) first, but a default mongod only
+# listens on IPv4 (127.0.0.1) -> connection refused. Pin the loopback host.
+MONGO_URI = settings.MONGODB_URI.replace("://localhost", "://127.0.0.1")
+
+# If this is a local URI and nothing is listening, try to start mongod ourselves.
+try:
+    local_mongo.ensure_running(MONGO_URI)
+except Exception as e:  # pragma: no cover - never block startup on the helper
+    print(f"[mongo] local bootstrap skipped: {e}")
+
 _client_kwargs = {"serverSelectionTimeoutMS": 8000}
-if settings.MONGODB_URI.startswith("mongodb+srv://") or "mongodb.net" in settings.MONGODB_URI:
+if MONGO_URI.startswith("mongodb+srv://") or "mongodb.net" in MONGO_URI:
     _client_kwargs["tls"] = True
     _client_kwargs["tlsCAFile"] = certifi.where()
-_client: MongoClient = MongoClient(settings.MONGODB_URI, **_client_kwargs)
+_client: MongoClient = MongoClient(MONGO_URI, **_client_kwargs)
 db = _client[settings.MONGODB_DB]
 users = db["users"]
 profiles = db["profiles"]

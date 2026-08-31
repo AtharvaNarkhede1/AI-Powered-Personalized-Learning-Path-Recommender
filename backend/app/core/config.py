@@ -8,6 +8,12 @@ def _build_mongo_uri() -> str:
     user = (os.getenv("MONGODB_USERNAME", "") or "").strip().strip('"').strip("'")
     pw = (os.getenv("MONGODB_PASSWORD", "") or "").strip().strip('"').strip("'")
     if not uri:
+        print(
+            "[config] WARNING: MONGODB_URI is not set - falling back to "
+            "mongodb://localhost:27017. Accounts will NOT persist if this local "
+            "database is ephemeral (e.g. on a redeploy). Set MONGODB_URI to a "
+            "MongoDB Atlas connection string for durable auth."
+        )
         return "mongodb://localhost:27017"
     if "@" in uri.split("://", 1)[-1]:
         return uri
@@ -23,6 +29,7 @@ class Settings:
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     MONGODB_URI: str = _build_mongo_uri()
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "mongodb://localhost:27017")
     MONGODB_DB: str = (os.getenv("MONGODB_DB", "pathfinder") or "pathfinder").strip().strip('"')
     _BACKEND_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     COURSES_CSV: str = os.getenv("COURSES_CSV", os.path.join(_BACKEND_DIR, "app", "data", "courses.csv"))

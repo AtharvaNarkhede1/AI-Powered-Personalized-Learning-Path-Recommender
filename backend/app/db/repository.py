@@ -25,6 +25,11 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     return mongo.users.find_one({"email": email.lower().strip()})
 def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     return mongo.users.find_one({"_id": user_id})
+def update_user_password(user_id: str, password_hash: str) -> None:
+    mongo.users.update_one(
+        {"_id": user_id},
+        {"$set": {"password_hash": password_hash, "updated_at": _now()}},
+    )
 _PROFILE_FIELDS = (
     "user_status", "engineering_branch", "college_name", "current_year",
     "graduation_year", "interests", "career_goal_status", "target_career_id",

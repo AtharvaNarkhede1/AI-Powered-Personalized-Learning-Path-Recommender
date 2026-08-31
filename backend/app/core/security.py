@@ -8,11 +8,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.core.config import settings
 from app.db import mongo
 _bearer = HTTPBearer(auto_error=False)
+def _pw_bytes(plain: str) -> bytes:
+    # bcrypt only uses the first 72 bytes; truncate explicitly so hashing and
+    # verification always agree regardless of the installed bcrypt version.
+    return (plain or "").encode("utf-8")[:72]
 def hash_password(plain: str) -> str:
-    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(_pw_bytes(plain), bcrypt.gensalt()).decode("utf-8")
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+        return bcrypt.checkpw(_pw_bytes(plain), (hashed or "").encode("utf-8"))
     except (ValueError, TypeError):
         return False
 def create_access_token(user_id: str) -> str:
@@ -25,7 +29,10 @@ def create_access_token(user_id: str) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 def decode_token(token: str) -> Optional[str]:
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+            leeway=30,  # tolerate minor server clock skew
+        )
         return payload.get("sub")
     except jwt.PyJWTError:
         return None

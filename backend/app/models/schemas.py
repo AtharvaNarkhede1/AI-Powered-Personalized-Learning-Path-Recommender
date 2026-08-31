@@ -8,6 +8,9 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+class PasswordResetRequest(BaseModel):
+    email: str
+    new_password: str
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

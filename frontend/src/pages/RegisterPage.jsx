@@ -15,6 +15,7 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -22,6 +23,7 @@ export default function RegisterPage() {
     e.preventDefault();
     setErr(null);
     if (password.length < 6) { setErr('Password must be at least 6 characters.'); return; }
+    if (password !== confirm) { setErr('Passwords do not match.'); return; }
     setBusy(true);
     try {
       await register(email, password, fullName);
@@ -65,6 +67,10 @@ export default function RegisterPage() {
               <label>Password</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
               <p className="faint" style={{ fontSize: '0.76rem', marginTop: '0.3rem' }}>At least 6 characters.</p>
+            </div>
+            <div>
+              <label>Confirm password</label>
+              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
             </div>
             {err && <div className="badge badge-bad" style={{ padding: '0.5rem 0.7rem' }}>{err}</div>}
             <button className="btn-primary" type="submit" disabled={busy} style={{ width: '100%' }}>

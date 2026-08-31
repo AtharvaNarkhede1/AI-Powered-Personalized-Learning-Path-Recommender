@@ -46,6 +46,7 @@ export const api = {
   // Auth
   register: (data) => fetchJSON('/auth/register', body(data)),
   login: (data) => fetchJSON('/auth/login', body(data)),
+  resetPassword: (data) => fetchJSON('/auth/reset-password', body(data)),
   me: () => fetchJSON('/auth/me'),
 
   // Profile

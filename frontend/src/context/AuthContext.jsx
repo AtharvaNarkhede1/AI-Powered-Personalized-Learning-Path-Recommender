@@ -26,11 +26,19 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback(async (email, password) => {
-    applyToken(await api.login({ email, password }));
+    applyToken(await api.login({ email: email.trim().toLowerCase(), password }));
   }, [applyToken]);
 
   const register = useCallback(async (email, password, full_name) => {
-    applyToken(await api.register({ email, password, full_name }));
+    applyToken(await api.register({
+      email: email.trim().toLowerCase(), password, full_name: full_name.trim(),
+    }));
+  }, [applyToken]);
+
+  const resetPassword = useCallback(async (email, newPassword) => {
+    applyToken(await api.resetPassword({
+      email: email.trim().toLowerCase(), new_password: newPassword,
+    }));
   }, [applyToken]);
 
   // hydrate on load / token change
@@ -52,7 +60,7 @@ export function AuthProvider({ children }) {
   }, [logout]);
 
   return (
-    <AuthContext.Provider value={{ token, user, loading, login, register, logout, isAuthed: !!token }}>
+    <AuthContext.Provider value={{ token, user, loading, login, register, resetPassword, logout, isAuthed: !!token }}>
       {children}
     </AuthContext.Provider>
   );

@@ -5,6 +5,10 @@ __pycache__/
 venv/
 *.db
 
+# Local auto-started MongoDB data
+.mongodb-data/
+backend/.mongodb-data/
+
 # Node
 node_modules/
 dist/
