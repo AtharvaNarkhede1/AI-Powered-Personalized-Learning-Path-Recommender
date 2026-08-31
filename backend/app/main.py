@@ -1,3 +1,4 @@
+import threading
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -46,18 +47,20 @@ def _startup():
     try:
         from app.db import mongo
         mongo.ping()
-        mongo.ensure_indexes()
         print(f"[mongo] Connected to '{settings.MONGODB_DB}' successfully!")
     except Exception as e:
         print(f"[mongo] Connection warning: {e}")
 
-    try:
-        from app.ml.engine import engine
-        engine.warm()
-        print("[ml.engine] Engine warm-up completed successfully!")
-    except Exception as e:
-        print(f"[startup] ML engine warm warning: {e}")
-    print("[startup] Server ready to accept requests.")
+    def _warm_bg():
+        try:
+            from app.ml.engine import engine
+            engine.warm()
+            print("[ml.engine] Background engine warm-up completed!")
+        except Exception as e:
+            print(f"[startup] ML engine warm warning: {e}")
+
+    threading.Thread(target=_warm_bg, daemon=True).start()
+    print("[startup] Server ready & listening on port!")
 
 @app.get("/")
 def root_status():
